@@ -5,8 +5,12 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "datasets>=4.6.1",
+    "ipdb>=0.13.13",
+    "peft>=0.18.1",
     "textarena>=0.7.4",
     "torch>=2.9.1",
     "transformers>=4.57.6",
+    "trl>=0.29.0",
     "vllm>=0.16.0",
 ]
