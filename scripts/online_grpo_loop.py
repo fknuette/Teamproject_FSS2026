@@ -28,7 +28,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
     parser.add_argument("--base-model", type=str, default="Qwen/Qwen3-0.6B")
     parser.add_argument("--opponent-model", type=str, default="")
-    parser.add_argument("--loop-count", type=int, default=3)
+    parser.add_argument("--loop-count", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=30)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
@@ -125,13 +125,14 @@ def main() -> None:
             continue
 
         print(f"[Iter {iter_idx}] Merging LoRA adapter into full model for next vLLM rollout")
+        """
         merge_lora_adapter(
             base_model=policy_model,
             adapter_dir=str(adapter_out),
             merged_output_dir=str(merged_out),
         )
         policy_model = str(merged_out)
-
+        """
     print("Online GRPO loop finished.")
 
 

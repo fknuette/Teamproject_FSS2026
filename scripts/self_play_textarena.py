@@ -52,7 +52,6 @@ class VLLMTextArenaAgent(Agent):
             "raw_response": parsed.raw_text,
             "reasoning_trace": parsed.reasoning,
             "action": parsed.action,
-            "model_name": self.model_name,
         }
 
 
@@ -68,10 +67,8 @@ def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    llm_a = LLM(model=args.model_a, tensor_parallel_size=args.tensor_parallel_size,)
-    # llm_b = LLM(model=args.model_b, tensor_parallel_size=args.tensor_parallel_size,)
+    llm = LLM(model=args.model_a, tensor_parallel_size=args.tensor_parallel_size,)
 
-    import ipdb; ipdb.set_trace()  # Debug breakpoint to inspect arguments and flow
     sampling_params = SamplingParams(
         temperature=args.temperature,
         top_p=args.top_p,
@@ -85,12 +82,12 @@ def run_self_play(args: argparse.Namespace) -> None:
         env.reset(num_players=6)
 
         agents: dict[int, VLLMTextArenaAgent] = {
-            0: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
-            1: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
-            2: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
-            3: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
-            4: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
-            5: VLLMTextArenaAgent(llm_a, sampling_params, args.model_a),
+            0: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            1: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            2: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            3: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            4: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            5: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
         }
 
         game_records: list[TurnRecord] = []
