@@ -24,7 +24,6 @@ class TurnRecord:
     game_id: int
     turn_id: int
     player_id: int
-    model_name: str
     observation: str
     prompt: str
     raw_response: str
@@ -36,16 +35,17 @@ class TurnRecord:
 
 
 class VLLMTextArenaAgent(Agent):
-    def __init__(self, llm: LLM, sampling_params: SamplingParams, model_name: str):
+    def __init__(self, llm: LLM, sampling_params: SamplingParams):
         super().__init__()
         self.llm = llm
         self.sampling_params = sampling_params
-        self.model_name = model_name
 
     def __call__(self, observation: str) -> dict[str, str]:
         prompt = build_agent_prompt(observation)
+        
         outputs = self.llm.generate([prompt], self.sampling_params)
         raw_text = outputs[0].outputs[0].text
+        import ipdb; ipdb.set_trace()
         parsed = parse_model_response(raw_text)
         return {
             "prompt": prompt,
@@ -82,12 +82,12 @@ def run_self_play(args: argparse.Namespace) -> None:
         env.reset(num_players=6)
 
         agents: dict[int, VLLMTextArenaAgent] = {
-            0: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
-            1: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
-            2: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
-            3: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
-            4: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
-            5: VLLMTextArenaAgent(llm, sampling_params, args.model_a),
+            0: VLLMTextArenaAgent(llm, sampling_params),
+            1: VLLMTextArenaAgent(llm, sampling_params),
+            2: VLLMTextArenaAgent(llm, sampling_params),
+            3: VLLMTextArenaAgent(llm, sampling_params),
+            4: VLLMTextArenaAgent(llm, sampling_params),
+            5: VLLMTextArenaAgent(llm, sampling_params),
         }
 
         game_records: list[TurnRecord] = []
@@ -104,7 +104,6 @@ def run_self_play(args: argparse.Namespace) -> None:
                     game_id=game_id,
                     turn_id=turn_id,
                     player_id=player_id,
-                    model_name=agent_out["model_name"],
                     observation=observation,
                     prompt=agent_out["prompt"],
                     raw_response=agent_out["raw_response"],
