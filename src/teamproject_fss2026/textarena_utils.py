@@ -14,26 +14,19 @@ class ParsedResponse:
     reasoning: str
     action: str
 
-
+# Here you have the possibility to enhance the observation prompt from the system
 def build_agent_prompt(observation: str) -> str:
-    return (
-        "You are a competitive TextArena agent.\n"
-        "Think step by step and put your reasoning into <think>...</think>.\n"
-        "Then output exactly one final action in <action>...</action>.\n"
-        "Do not add anything after </action>.\n\n"
-        f"Observation:\n{observation}"
-    )
+    return (f"{observation}")
 
 
 def parse_model_response(raw_text: str) -> ParsedResponse:
-    reasoning_match = THINK_RE.search(raw_text)
-    action_match = ACTION_RE.search(raw_text)
+    # reasoning_match = THINK_RE.search(raw_text)
+    # action_match = ACTION_RE.search(raw_text)
 
-    reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
-    if action_match:
-        action = action_match.group(1).strip()
-    else:
-        bracket_match = BRACKET_ACTION_RE.search(raw_text)
-        action = bracket_match.group(0) if bracket_match else raw_text.strip().splitlines()[0]
+    #reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
+    reasoning = ""
+    
+    bracket_match = BRACKET_ACTION_RE.search(raw_text)
+    action = bracket_match.group(0) if bracket_match else raw_text.strip().splitlines()[0]
 
     return ParsedResponse(raw_text=raw_text, reasoning=reasoning, action=action)
