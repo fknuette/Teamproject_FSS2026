@@ -34,7 +34,8 @@ def parse_model_response(raw_text: str) -> ParsedResponse:
     #reasoning = reasoning_match.group(1).strip() if reasoning_match else ""
     reasoning = ""
     
-    bracket_match = BRACKET_ACTION_RE.search(raw_text)
-    action = bracket_match.group(0) if bracket_match else raw_text.strip().splitlines()[0]
+    #bracket_match = BRACKET_ACTION_RE.search(raw_text)
+    #action = bracket_match.group(0) if bracket_match else raw_text.strip().splitlines()[0]
+    action = raw_text
 
     return ParsedResponse(raw_text=raw_text, reasoning=reasoning, action=action)
