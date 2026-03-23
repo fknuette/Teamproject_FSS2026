@@ -42,10 +42,8 @@ class VLLMTextArenaAgent(Agent):
 
     def __call__(self, observation: str) -> dict[str, str]:
         prompt = build_agent_prompt(observation)
-        
         outputs = self.llm.generate([prompt], self.sampling_params)
         raw_text = outputs[0].outputs[0].text
-        import ipdb; ipdb.set_trace()
         parsed = parse_model_response(raw_text)
         return {
             "prompt": prompt,
@@ -97,8 +95,8 @@ def run_self_play(args: argparse.Namespace) -> None:
         while not done:
             player_id, observation = env.get_observation()
             agent_out = agents[player_id](observation)
+            print(agent_out["action"])
             done, _ = env.step(action=agent_out["action"])
-
             game_records.append(
                 TurnRecord(
                     game_id=game_id,
