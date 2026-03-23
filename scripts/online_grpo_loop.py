@@ -30,7 +30,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--opponent-model", type=str, default="")
     parser.add_argument("--loop-count", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
-    parser.add_argument("--games-per-iter", type=int, default=30)
+    parser.add_argument("--games-per-iter", type=int, default=1)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
 
     parser.add_argument("--temperature", type=float, default=0.7)

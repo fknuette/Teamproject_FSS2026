@@ -65,7 +65,9 @@ def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    print(f"[INFO] Loading model: {args.model_a}")
     llm = LLM(model=args.model_a, tensor_parallel_size=args.tensor_parallel_size,)
+    print(f"[INFO] Model loaded successfully")
 
     sampling_params = SamplingParams(
         temperature=args.temperature,
@@ -76,6 +78,7 @@ def run_self_play(args: argparse.Namespace) -> None:
     all_records: list[TurnRecord] = []
 
     for game_id in range(args.num_games):
+        print(f"\n[GAME {game_id + 1}/{args.num_games}] Starting...")
         env = ta.make(args.env_id)
         env.reset(num_players=6)
 
@@ -94,8 +97,9 @@ def run_self_play(args: argparse.Namespace) -> None:
 
         while not done:
             player_id, observation = env.get_observation()
+            print(f"  [Turn {turn_id}] Player {player_id} thinking...")
             agent_out = agents[player_id](observation)
-            print(agent_out["action"])
+            print(f"  [Turn {turn_id}] Player {player_id} action: {agent_out['action'][:50]}...")
             done, _ = env.step(action=agent_out["action"])
             game_records.append(
                 TurnRecord(
@@ -114,6 +118,7 @@ def run_self_play(args: argparse.Namespace) -> None:
         rewards, _game_info = env.close()
         reward_map = _normalize_rewards(rewards)
         max_reward = max(reward_map.values())
+        print(f"[GAME {game_id + 1}] Finished! Rewards: {reward_map}")
 
         for record in game_records:
             r = reward_map.get(record.player_id, 0.0)
@@ -127,7 +132,7 @@ def run_self_play(args: argparse.Namespace) -> None:
         for rec in all_records:
             f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
 
-    print(f"Wrote {len(all_records)} turn records to {output_path}")
+    print(f"\n[DONE] Wrote {len(all_records)} turn records to {output_path}")
 
 
 def build_parser() -> argparse.ArgumentParser:
