@@ -16,15 +16,29 @@ class ParsedResponse:
 
 # Here you have the possibility to enhance the observation prompt from the system
 def build_agent_prompt(observation: str) -> str:
-    matches = re.findall('\[GAME\](.*)(?=\n|$)', observation)
-    order = matches[-1].strip()
-    if "Voting phase" in order:
-        order = "You MUST vote. You MUST NOT discuss. You MUST NOT explain. You MUST NOT output anything except a valid bracketed number."
-    elif "Discuss" in order:
-        order = "You MUST discuss. Think privately. Output ONLY your public statement. Do NOT reveal hidden reasoning."
-    else:
-        order = "You MUST perform your role action. Output ONLY one valid bracketed number. Do NOT explain."
-    return f"{observation}\n\n{order}"
+    
+    final_prompt = ""
+    
+    # Instruktion
+    final_prompt += "### Instruction:\n"
+    final_prompt += "You are a player in a text-based social deduction game. Your goal is to win by outsmarting other players through strategic thinking and deception. Carefully analyze the information provided and make your move accordingly.\n\n"
+    
+    # Context
+    final_prompt += "### Context:\n"
+    final_prompt += observation + "\n\n"
+    
+    # Task
+    final_prompt += "### Task:\n"
+    final_prompt += "If the phase is NIGHT:\n"
+    final_prompt += "- choose exactly one valid target. This means after ANSWER you put just ONE Number!\n\n"
+    final_prompt += "If the phase is DAY:\n"
+    final_prompt += "- speak naturally with other players. This means you do after ANSWER you do things what you want to say to the others!\n\n"
+    # Rules
+    # Answer
+    final_prompt += "### Answer:\n"
+    final_prompt += "I will vote for player ["
+    return final_prompt
+    
 
 
 def parse_model_response(raw_text: str) -> ParsedResponse:
