@@ -16,34 +16,35 @@ class ParsedResponse:
     action: str
 
 # Here you have the possibility to enhance the observation prompt from the system
-def build_agent_prompt(observation: str, voting : boolean) -> str:
-    
-    final_prompt = ""
-    
-    # Instruktion
-    final_prompt += "### INSTRUCTION:\n"
-    final_prompt += "You are a player in a text-based social deduction game. Your goal is to win by outsmarting other players through strategic thinking and deception. Carefully analyze the information provided and make your move accordingly.\n\n"
-    
-    # Context
-    final_prompt += "### CONTEXT:\n"
-    final_prompt += observation + "\n\n"
-    
-    # Task
-    instruct_prompt = ""
-    
-    if voting:
-        instruct_prompt += "Choose exactly one valid target for your action. This means after ANSWER you put just ONE Number corresponding to the player you want to target and not your own Number!\n\n"
+def build_agent_prompt(observation: str) -> str:
+    parts = observation.split("[GAME]")
+    system_part = parts[1].strip()
+    game_state = "[GAME]".join(parts[2:]).strip()
+    matches = re.findall(r'\[GAME\](.*)(?=\n|$)', observation)
+    order = matches[-1].strip()
+    if "Voting phase" in order:
+        order = "You MUST vote. You MUST NOT discuss. You MUST NOT explain. You MUST NOT output anything except a valid bracketed number."
+    elif "Discuss" in order:
+        order = "You MUST discuss. Think privately. Output ONLY your public statement. Do NOT reveal hidden reasoning."
     else:
-        instruct_prompt += "You can talk and share your thoughts with other players. After ANSWER you can write freely what you want to say. But remember, the other players will see it and might use it against you, so choose your words wisely!\n\n"
-    # Rules
-    # Answer
-    final_prompt += "### ANSWER:\n"
-    '''
-    if voting:
-        final_prompt += "I would vote for player ["
-    '''
-    return final_prompt
+        order = "You MUST perform your role action. Output ONLY one valid bracketed number. Do NOT explain."
     
+    prompt = f"Game State: {observation}\n\nInstruction: {order}"
+
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7b-instruct")
+
+    #prompt = "Give me a short introduction to large language model."
+    messages = [
+        {"role": "system", "content": system_part},
+        {"role": "user", "content": prompt}
+    ]
+    text = tokenizer.apply_chat_template(
+        messages,
+        tokenize=False,
+        add_generation_prompt=True
+    )
+    #model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
+    return text
 
 
 def parse_model_response(raw_text: str) -> ParsedResponse:
