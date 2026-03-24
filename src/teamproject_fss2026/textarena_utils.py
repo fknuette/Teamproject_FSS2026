@@ -1,5 +1,5 @@
 from __future__ import annotations
-
+from transformers import AutoTokenizer
 import re
 from dataclasses import dataclass
 from xmlrpc.client import boolean
@@ -29,9 +29,9 @@ def build_agent_prompt(observation: str) -> str:
     else:
         order = "You MUST perform your role action. Output ONLY one valid bracketed number. Do NOT explain."
     
-    prompt = f"Game State: {observation}\n\nInstruction: {order}"
+    prompt = f"Game State: {game_state}\n\nInstruction: {order}"
 
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7b-instruct")
+    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
 
     #prompt = "Give me a short introduction to large language model."
     messages = [
