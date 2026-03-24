@@ -26,7 +26,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Online loop: rollout -> reward data -> GRPO LoRA -> next rollout")
 
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
-    parser.add_argument("--base-model", type=str, default="Qwen/Qwen3-8B")
+    parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--opponent-model", type=str, default="")
     parser.add_argument("--loop-count", type=int, default=1)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
