@@ -66,7 +66,7 @@ class VLLMTextArenaAgent(Agent):
             # Hier evtl. temperature > 0 lassen für natürlichere Sprache
         
         
-        own_prompt = build_agent_prompt(observation, voting)
+        own_prompt = build_agent_prompt(observation)
         
         
         prompt = self.tokenizer.apply_chat_template(
