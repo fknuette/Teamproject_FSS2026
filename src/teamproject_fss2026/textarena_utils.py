@@ -16,7 +16,7 @@ class ParsedResponse:
     action: str
 
 # Here you have the possibility to enhance the observation prompt from the system
-def build_agent_prompt(observation: str) -> str:
+def build_agent_prompt(observation: str) -> list:
     parts = observation.split("[GAME]")
     system_part = parts[1].strip()
     game_state = "[GAME]".join(parts[2:]).strip()
@@ -31,20 +31,11 @@ def build_agent_prompt(observation: str) -> str:
     
     prompt = f"Game State: {game_state}\n\nInstruction: {order}"
 
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen2.5-7B-Instruct")
-
-    #prompt = "Give me a short introduction to large language model."
     messages = [
         {"role": "system", "content": system_part},
         {"role": "user", "content": prompt}
     ]
-    text = tokenizer.apply_chat_template(
-        messages,
-        tokenize=False,
-        add_generation_prompt=True
-    )
-    #model_inputs = tokenizer([text], return_tensors="pt").to(model.device)
-    return text
+    return messages
 
 
 def parse_model_response(raw_text: str) -> ParsedResponse:
