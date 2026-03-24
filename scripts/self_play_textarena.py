@@ -13,8 +13,10 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import textarena as ta
+import re
 from textarena.core import Agent
 from vllm import LLM, SamplingParams
+from transformers import AutoTokenizer
 
 from teamproject_fss2026.textarena_utils import build_agent_prompt, parse_model_response
 
@@ -35,17 +37,47 @@ class TurnRecord:
 
 
 class VLLMTextArenaAgent(Agent):
-    def __init__(self, llm: LLM, sampling_params: SamplingParams):
+    def __init__(self, llm: LLM, tokinizer: AutoTokenizer) -> None:
         super().__init__()
         self.llm = llm
-        self.sampling_params = sampling_params
+        self.tokenizer = tokinizer
 
     def __call__(self, observation: str) -> dict[str, str]:
-        prompt = build_agent_prompt(observation)
         
-        outputs = self.llm.generate([prompt], self.sampling_params)
-        raw_text = outputs[0].outputs[0].text
+        # Findout in we will vote or not
+        voting = re.search(r"\:\s\[(\d+)\]", observation)
         import ipdb; ipdb.set_trace()
+        # Logik-Check: Nacht (Nur Nummer) vs. Tag (Reden/Rechnen)
+        if voting:
+            current_params = SamplingParams(
+                temperature=0.7,
+                top_p=0.95,
+                max_tokens=100,
+                # stop=[".", "\n", "]", " "] # Stoppt sofort nach der Zahl/Klammer
+            )
+        else:
+            # Tag-Modus: Darf reden, stoppt nur am nächsten Block-Trenner
+            current_params = SamplingParams(
+                temperature=0.7,
+                top_p=0.95,
+                max_tokens=200,
+                # stop=["###"] # Stoppt erst am nächsten Block
+            )
+            # Hier evtl. temperature > 0 lassen für natürlichere Sprache
+        
+        
+        own_prompt = build_agent_prompt(observation, voting)
+        
+        
+        prompt = self.tokenizer.apply_chat_template(
+                    own_prompt,
+                    tokenize=False,
+                    add_generation_prompt=True,
+                    enable_thinking=False
+                )
+        
+        outputs = self.llm.generate([prompt], current_params)
+        raw_text = outputs[0].outputs[0].text
         parsed = parse_model_response(raw_text)
         return {
             "prompt": prompt,
@@ -68,12 +100,7 @@ def run_self_play(args: argparse.Namespace) -> None:
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
     llm = LLM(model=args.model_a, tensor_parallel_size=args.tensor_parallel_size,)
-
-    sampling_params = SamplingParams(
-        temperature=args.temperature,
-        top_p=args.top_p,
-        max_tokens=args.max_new_tokens,
-    )
+    tokenizer = AutoTokenizer.from_pretrained(args.model_a)
 
     all_records: list[TurnRecord] = []
 
@@ -82,12 +109,12 @@ def run_self_play(args: argparse.Namespace) -> None:
         env.reset(num_players=6)
 
         agents: dict[int, VLLMTextArenaAgent] = {
-            0: VLLMTextArenaAgent(llm, sampling_params),
-            1: VLLMTextArenaAgent(llm, sampling_params),
-            2: VLLMTextArenaAgent(llm, sampling_params),
-            3: VLLMTextArenaAgent(llm, sampling_params),
-            4: VLLMTextArenaAgent(llm, sampling_params),
-            5: VLLMTextArenaAgent(llm, sampling_params),
+            0: VLLMTextArenaAgent(llm, tokenizer),
+            1: VLLMTextArenaAgent(llm, tokenizer),
+            2: VLLMTextArenaAgent(llm, tokenizer),
+            3: VLLMTextArenaAgent(llm, tokenizer),
+            4: VLLMTextArenaAgent(llm, tokenizer),
+            5: VLLMTextArenaAgent(llm, tokenizer),
         }
 
         game_records: list[TurnRecord] = []
