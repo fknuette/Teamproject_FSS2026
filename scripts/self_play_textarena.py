@@ -45,28 +45,36 @@ class VLLMTextArenaAgent(Agent):
     def __call__(self, observation: str) -> dict[str, str]:
         
         # Findout in we will vote or not
-        voting = re.search(r"\:\s\[(\d+)\]", observation)
-        import ipdb; ipdb.set_trace()
-        # Logik-Check: Nacht (Nur Nummer) vs. Tag (Reden/Rechnen)
-        if voting:
-            current_params = SamplingParams(
-                temperature=0.7,
-                top_p=0.95,
-                max_tokens=100,
-                # stop=[".", "\n", "]", " "] # Stoppt sofort nach der Zahl/Klammer
-            )
+        matches = re.findall(r'\[GAME\](.*)(?=\n|$)', observation)
+        valid_matches = [m.strip() for m in matches if "invalid move" not in m.lower()]
+        phase_text = valid_matches[-1]
+        if "Voting phase" in phase_text:
+            phase = "Voting"
+        elif "Discuss" in order:
+            phase = "Discuss"
         else:
-            # Tag-Modus: Darf reden, stoppt nur am nächsten Block-Trenner
+            phase = "Action"
+
+        # Tag-Modus: Darf reden, stoppt nur am nächsten Block-Trenner
+        if phase == "Discuss":
             current_params = SamplingParams(
                 temperature=0.7,
                 top_p=0.95,
                 max_tokens=200,
                 # stop=["###"] # Stoppt erst am nächsten Block
             )
+        else:
+            # Logik-Check: Nacht (Nur Nummer) vs. Tag (Reden/Rechnen)
+            current_params = SamplingParams(
+                temperature=0.7,
+                top_p=0.95,
+                max_tokens=100,
+                # stop=[".", "\n", "]", " "] # Stoppt sofort nach der Zahl/Klammer
+            )
             # Hier evtl. temperature > 0 lassen für natürlichere Sprache
         
         
-        own_prompt = build_agent_prompt(observation)
+        own_prompt = build_agent_prompt(observation, phase)
         
         
         prompt = self.tokenizer.apply_chat_template(

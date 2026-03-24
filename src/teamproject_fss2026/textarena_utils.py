@@ -2,6 +2,7 @@ from __future__ import annotations
 from transformers import AutoTokenizer
 import re
 from dataclasses import dataclass
+from typing import Literal
 from xmlrpc.client import boolean
 
 THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
@@ -16,15 +17,13 @@ class ParsedResponse:
     action: str
 
 # Here you have the possibility to enhance the observation prompt from the system
-def build_agent_prompt(observation: str) -> list:
+def build_agent_prompt(observation: str, phase: Literal["Discuss", "Voting", "Action"]) -> list:
     parts = observation.split("[GAME]")
     system_part = parts[1].strip()
     game_state = "[GAME]".join(parts[2:]).strip()
-    matches = re.findall(r'\[GAME\](.*)(?=\n|$)', observation)
-    order = matches[-1].strip()
-    if "Voting phase" in order:
+    if phase == "Voting":
         order = "You MUST vote. You MUST NOT discuss. You MUST NOT explain. You MUST NOT output anything except a valid bracketed number."
-    elif "Discuss" in order:
+    elif phase == "Discuss":
         order = "You MUST discuss. Think privately. Output ONLY your public statement. Do NOT reveal hidden reasoning."
     else:
         order = "You MUST perform your role action. Output ONLY one valid bracketed number. Do NOT explain."
