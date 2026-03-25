@@ -24,16 +24,11 @@ from teamproject_fss2026.textarena_utils import build_agent_prompt, parse_model_
 @dataclass
 class TurnRecord:
     game_id: int
-    turn_id: int
-    player_id: int
     observation: str
-    prompt: str
-    raw_response: str
-    reasoning_trace: str
-    action: str
-    raw_env_reward: float = 0.0
-    final_reward: float = 0.0
-    won: int = 0
+    response: str
+    reward: float = 0.0
+    player_id: int = 0
+    turn_id: int = 0
 
 
 class VLLMTextArenaAgent(Agent):
@@ -88,9 +83,7 @@ class VLLMTextArenaAgent(Agent):
         raw_text = outputs[0].outputs[0].text
         parsed = parse_model_response(raw_text)
         return {
-            "prompt": prompt,
-            "raw_response": parsed.raw_text,
-            "reasoning_trace": parsed.reasoning,
+            "response": raw_text,
             "action": parsed.action,
         }
 
@@ -140,23 +133,16 @@ def run_self_play(args: argparse.Namespace) -> None:
                     turn_id=turn_id,
                     player_id=player_id,
                     observation=observation,
-                    prompt=agent_out["prompt"],
-                    raw_response=agent_out["raw_response"],
-                    reasoning_trace=agent_out["reasoning_trace"],
-                    action=agent_out["action"],
+                    response=agent_out["response"],
                 )
             )
             turn_id += 1
 
         rewards, _game_info = env.close()
         reward_map = _normalize_rewards(rewards)
-        max_reward = max(reward_map.values())
 
         for record in game_records:
-            r = reward_map.get(record.player_id, 0.0)
-            record.raw_env_reward = r
-            record.won = int(r == max_reward)
-            record.final_reward = float(record.won)
+            record.reward = reward_map.get(record.player_id, 0.0)
 
         all_records.extend(game_records)
 
