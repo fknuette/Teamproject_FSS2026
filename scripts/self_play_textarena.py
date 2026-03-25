@@ -50,7 +50,7 @@ class VLLMTextArenaAgent(Agent):
         phase_text = valid_matches[-1]
         if "Voting phase" in phase_text:
             phase = "Voting"
-        elif "Discuss" in order:
+        elif "Discuss" in phase_text:
             phase = "Discuss"
         else:
             phase = "Action"
