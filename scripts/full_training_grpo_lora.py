@@ -4,6 +4,9 @@ GRPO (Group Relative Policy Optimization) Training with LoRA
 This script implements GRPO training for LLMs playing Secret Mafia.
 It loads self-play traces, computes group-relative advantages, and
 updates the policy using LoRA adapters.
+
+Expected JSONL format:
+    {"game_id": 0, "observation": "...", "response": "...", "reward": 1.0, "player_id": 4, "turn_id": 0}
 """
 
 from __future__ import annotations
@@ -13,7 +16,6 @@ import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
 import sys
 
 import torch
@@ -35,13 +37,13 @@ if str(SRC) not in sys.path:
 
 @dataclass
 class TrainingSample:
-    """A single training sample with prompt, response, and advantage."""
-    prompt: str
+    """A single training sample with observation, response, and advantage."""
+    observation: str
     response: str
     advantage: float
     game_id: int
-    player_id: int
-    won: int
+    player_id: int = 0
+    turn_id: int = 0
 
 
 # =============================================================================
@@ -54,6 +56,14 @@ class GRPODataset(Dataset):
     
     Loads JSONL traces, groups by game_id, and computes normalized advantages
     within each group (game). Winners get positive advantages, losers negative.
+    
+    Expected JSONL fields:
+        - game_id (required): For grouping
+        - observation (required): Input for the model
+        - response (required): Model output to learn from
+        - reward (required): 1.0 for win, 0.0 for loss
+        - player_id (optional): For debugging
+        - turn_id (optional): For debugging
     """
     
     def __init__(
@@ -95,12 +105,12 @@ class GRPODataset(Dataset):
         # Compute advantages within each game
         for game_id, game_records in games.items():
             # Get rewards for this game
-            rewards = [r["final_reward"] for r in game_records]
+            rewards = [r["reward"] for r in game_records]
             
             # Normalize rewards within the game (group-relative)
-            # Mean-center and optionally scale
             mean_reward = sum(rewards) / len(rewards)
-            std_reward = math.sqrt(sum((r - mean_reward) ** 2 for r in rewards) / len(rewards))
+            variance = sum((r - mean_reward) ** 2 for r in rewards) / len(rewards)
+            std_reward = math.sqrt(variance) if variance > 0 else 1.0
             
             # Avoid division by zero
             if std_reward < 1e-8:
@@ -108,28 +118,41 @@ class GRPODataset(Dataset):
             
             for record in game_records:
                 # Compute normalized advantage
-                advantage = (record["final_reward"] - mean_reward) / std_reward
+                advantage = (record["reward"] - mean_reward) / std_reward
                 
                 # Create training sample
-                # The prompt is the observation, response is the raw_response
                 sample = TrainingSample(
-                    prompt=record["prompt"],
-                    response=record["raw_response"],
+                    observation=record["observation"],
+                    response=record["response"],
                     advantage=advantage,
                     game_id=game_id,
-                    player_id=record["player_id"],
-                    won=record["won"],
+                    player_id=record.get("player_id", 0),
+                    turn_id=record.get("turn_id", 0),
                 )
                 self.samples.append(sample)
         
         # Filter out samples with empty responses
+        original_count = len(self.samples)
         self.samples = [s for s in self.samples if s.response.strip()]
+        filtered_count = original_count - len(self.samples)
+        
+        if filtered_count > 0:
+            print(f"[GRPODataset] Filtered {filtered_count} samples with empty responses")
+        
         print(f"[GRPODataset] Created {len(self.samples)} training samples")
         
         # Print advantage statistics
-        advantages = [s.advantage for s in self.samples]
-        print(f"[GRPODataset] Advantage stats: mean={sum(advantages)/len(advantages):.3f}, "
-              f"min={min(advantages):.3f}, max={max(advantages):.3f}")
+        if self.samples:
+            advantages = [s.advantage for s in self.samples]
+            print(f"[GRPODataset] Advantage stats: "
+                  f"mean={sum(advantages)/len(advantages):.3f}, "
+                  f"min={min(advantages):.3f}, "
+                  f"max={max(advantages):.3f}")
+            
+            # Print win/loss distribution
+            wins = sum(1 for s in self.samples if s.advantage > 0)
+            losses = len(self.samples) - wins
+            print(f"[GRPODataset] Distribution: {wins} positive, {losses} negative advantages")
     
     def __len__(self) -> int:
         return len(self.samples)
@@ -137,9 +160,9 @@ class GRPODataset(Dataset):
     def __getitem__(self, idx: int) -> dict:
         sample = self.samples[idx]
         
-        # Tokenize prompt
+        # Tokenize observation (prompt)
         prompt_tokens = self.tokenizer(
-            sample.prompt,
+            sample.observation,
             truncation=True,
             max_length=self.max_prompt_length,
             return_tensors="pt",
@@ -180,12 +203,12 @@ class GRPODataset(Dataset):
 
 
 def collate_fn(batch: list[dict]) -> dict:
-    """Collate function with padding."""
+    """Collate function with dynamic padding."""
     
-    # Find max lengths
+    # Find max length in this batch
     max_length = max(item["input_ids"].shape[0] for item in batch)
     
-    # Pad sequences
+    # Prepare lists for stacking
     input_ids = []
     attention_mask = []
     labels = []
@@ -200,11 +223,11 @@ def collate_fn(batch: list[dict]) -> dict:
         padded_input_ids = F.pad(item["input_ids"], (0, padding_length), value=0)
         input_ids.append(padded_input_ids)
         
-        # Pad attention_mask with 0
+        # Pad attention_mask with 0 (ignore padding)
         padded_attention_mask = F.pad(item["attention_mask"], (0, padding_length), value=0)
         attention_mask.append(padded_attention_mask)
         
-        # Pad labels with -100 (ignore index)
+        # Pad labels with -100 (ignore in loss)
         padded_labels = F.pad(item["labels"], (0, padding_length), value=-100)
         labels.append(padded_labels)
         
@@ -234,14 +257,21 @@ def setup_model_with_lora(
     """
     Load base model and add LoRA adapters.
     
+    Args:
+        model_name: HuggingFace model name or path
+        lora_r: LoRA rank
+        lora_alpha: LoRA alpha (scaling)
+        lora_dropout: Dropout for LoRA layers
+        device: Device to load model on
+    
     Returns:
-        - model: PeftModel with LoRA adapters (trainable)
-        - tokenizer: AutoTokenizer
+        model: PeftModel with LoRA adapters (trainable)
+        tokenizer: AutoTokenizer
     """
     print(f"[Setup] Loading base model: {model_name}")
     
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(model_name)
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
@@ -276,6 +306,13 @@ def setup_reference_model(
 ) -> AutoModelForCausalLM:
     """
     Load frozen reference model for KL divergence calculation.
+    
+    Args:
+        model_name: HuggingFace model name or path
+        device: Device to load model on
+    
+    Returns:
+        Frozen reference model
     """
     print(f"[Setup] Loading reference model: {model_name}")
     
@@ -303,7 +340,7 @@ def compute_log_probs_per_token(
     input_ids: torch.Tensor,
     attention_mask: torch.Tensor,
     labels: torch.Tensor,
-) -> torch.Tensor:
+) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Compute per-token log probabilities for the response tokens.
     
@@ -314,7 +351,8 @@ def compute_log_probs_per_token(
         labels: Labels with -100 for prompt tokens [batch_size, seq_len]
     
     Returns:
-        log_probs: Per-token log probs [batch_size, seq_len]
+        token_log_probs: Per-token log probs [batch_size, seq_len-1]
+        mask: Mask for response tokens [batch_size, seq_len-1]
     """
     with torch.amp.autocast('cuda', dtype=torch.bfloat16):
         outputs = model(
@@ -332,10 +370,9 @@ def compute_log_probs_per_token(
     log_probs = F.log_softmax(shift_logits, dim=-1)
     
     # Gather log probs for actual tokens
-    # Shape: [batch_size, seq_len-1]
     token_log_probs = log_probs.gather(
         dim=-1,
-        index=shift_labels.unsqueeze(-1).clamp(min=0)  # Clamp to avoid -100 index error
+        index=shift_labels.unsqueeze(-1).clamp(min=0)
     ).squeeze(-1)
     
     # Mask out prompt tokens (where labels == -100)
@@ -353,6 +390,15 @@ def compute_sequence_log_probs(
 ) -> torch.Tensor:
     """
     Compute sequence-level log probability (sum of token log probs).
+    
+    Args:
+        model: Language model
+        input_ids: Input token IDs
+        attention_mask: Attention mask
+        labels: Labels with -100 for prompt
+    
+    Returns:
+        Sequence log probabilities [batch_size]
     """
     token_log_probs, mask = compute_log_probs_per_token(
         model, input_ids, attention_mask, labels
@@ -360,10 +406,6 @@ def compute_sequence_log_probs(
     
     # Sum log probs over sequence (only response tokens)
     sequence_log_probs = (token_log_probs * mask).sum(dim=-1)
-    
-    # Optionally normalize by response length
-    response_lengths = mask.sum(dim=-1).clamp(min=1)
-    # sequence_log_probs = sequence_log_probs / response_lengths  # Uncomment for length normalization
     
     return sequence_log_probs
 
@@ -409,8 +451,7 @@ def grpo_loss(
             ref_model, input_ids, attention_mask, labels
         )
     
-    # Compute probability ratio: exp(log_pi - log_pi_old)
-    # Here we use ref_model as pi_old (the model before this training step)
+    # Compute probability ratio: exp(log_pi - log_pi_ref)
     log_ratio = policy_log_probs - ref_log_probs
     ratio = torch.exp(log_ratio)
     
@@ -418,13 +459,11 @@ def grpo_loss(
     clipped_ratio = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon)
     
     # Policy loss (negative because we minimize)
-    # Take minimum of clipped and unclipped (pessimistic bound)
     policy_loss_unclipped = -advantages * ratio
     policy_loss_clipped = -advantages * clipped_ratio
     policy_loss = torch.max(policy_loss_unclipped, policy_loss_clipped).mean()
     
     # KL divergence penalty (approximate)
-    # KL(policy || ref) ≈ E[log(policy/ref)] = E[log_ratio]
     kl_div = log_ratio.mean()
     
     # Total loss
@@ -448,9 +487,7 @@ def grpo_loss(
 # =============================================================================
 
 class GRPOTrainer:
-    """
-    GRPO Trainer for LLM fine-tuning.
-    """
+    """GRPO Trainer for LLM fine-tuning with LoRA."""
     
     def __init__(
         self,
@@ -477,6 +514,7 @@ class GRPOTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         
+        # Training hyperparameters
         self.epochs = epochs
         self.batch_size = batch_size
         self.gradient_accumulation_steps = gradient_accumulation_steps
@@ -511,7 +549,7 @@ class GRPOTrainer:
         self.epoch = 0
     
     def train(self) -> None:
-        """Run the training loop."""
+        """Run the GRPO training loop."""
         
         print(f"\n[Training] Starting GRPO training")
         print(f"  Epochs: {self.epochs}")
@@ -519,6 +557,8 @@ class GRPOTrainer:
         print(f"  Gradient accumulation steps: {self.gradient_accumulation_steps}")
         print(f"  Effective batch size: {self.batch_size * self.gradient_accumulation_steps}")
         print(f"  Learning rate: {self.learning_rate}")
+        print(f"  Clip epsilon: {self.clip_epsilon}")
+        print(f"  KL coefficient: {self.kl_coef}")
         print(f"  Total samples: {len(self.train_dataset)}")
         print(f"  Steps per epoch: {len(self.train_dataloader)}")
         
@@ -532,12 +572,13 @@ class GRPOTrainer:
                 "policy_loss": [],
                 "kl_div": [],
                 "total_loss": [],
+                "ratio_mean": [],
             }
             
             progress_bar = tqdm(self.train_dataloader, desc=f"Epoch {epoch + 1}")
             
             for step, batch in enumerate(progress_bar):
-                # Move batch to device
+                # Move batch to GPU
                 input_ids = batch["input_ids"].cuda()
                 attention_mask = batch["attention_mask"].cuda()
                 labels = batch["labels"].cuda()
@@ -579,11 +620,16 @@ class GRPOTrainer:
                     
                     # Logging
                     if self.global_step % self.logging_steps == 0:
-                        avg_metrics = {
-                            k: sum(v[-self.logging_steps:]) / len(v[-self.logging_steps:])
+                        recent_metrics = {
+                            k: sum(v[-self.logging_steps * self.gradient_accumulation_steps:]) / 
+                               len(v[-self.logging_steps * self.gradient_accumulation_steps:])
                             for k, v in epoch_metrics.items() if v
                         }
-                        progress_bar.set_postfix(avg_metrics)
+                        progress_bar.set_postfix({
+                            "loss": f"{recent_metrics.get('total_loss', 0):.4f}",
+                            "kl": f"{recent_metrics.get('kl_div', 0):.4f}",
+                            "ratio": f"{recent_metrics.get('ratio_mean', 0):.3f}",
+                        })
                     
                     # Save checkpoint
                     if self.global_step % self.save_steps == 0:
@@ -597,7 +643,7 @@ class GRPOTrainer:
         
         # Save final model
         self._save_checkpoint(final=True)
-        print(f"\n[Training] Completed!")
+        print(f"\n[Training] Completed! Final model saved to {self.output_dir / 'final'}")
     
     def _save_checkpoint(self, final: bool = False) -> None:
         """Save LoRA adapter checkpoint."""
@@ -623,22 +669,27 @@ def merge_lora_adapter(
     """
     Merge LoRA adapter weights into the base model.
     
-    This creates a standalone model that can be used with vLLM
+    Creates a standalone model that can be used with vLLM
     without needing to load adapters separately.
+    
+    Args:
+        base_model: HuggingFace model name or path
+        adapter_dir: Path to LoRA adapter
+        merged_output_dir: Output path for merged model
     """
     print(f"\n[Merge] Loading base model: {base_model}")
     print(f"[Merge] Loading adapter from: {adapter_dir}")
     
-    # Load base model
+    # Load base model on CPU for merging
     model = AutoModelForCausalLM.from_pretrained(
         base_model,
         torch_dtype=torch.bfloat16,
-        device_map="cpu",  # Load on CPU for merging
+        device_map="cpu",
         trust_remote_code=True,
     )
     
     # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(base_model)
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
     
     # Load LoRA adapter
     model = PeftModel.from_pretrained(model, adapter_dir)
@@ -662,10 +713,12 @@ def merge_lora_adapter(
 
 def run_training(args: argparse.Namespace) -> None:
     """
-    Main training function called by online_grpo_loop.py
+    Main training function.
+    
+    Can be called from online_grpo_loop.py or directly via CLI.
     """
     
-    # Setup models
+    # Setup policy model with LoRA
     policy_model, tokenizer = setup_model_with_lora(
         model_name=args.model,
         lora_r=args.lora_r,
@@ -673,6 +726,7 @@ def run_training(args: argparse.Namespace) -> None:
         lora_dropout=args.lora_dropout,
     )
     
+    # Setup frozen reference model
     ref_model = setup_reference_model(args.model)
     
     # Setup dataset
@@ -682,6 +736,11 @@ def run_training(args: argparse.Namespace) -> None:
         max_prompt_length=args.max_prompt_length,
         max_completion_length=args.max_completion_length,
     )
+    
+    # Check if we have data
+    if len(train_dataset) == 0:
+        print("[WARNING] No training samples found! Skipping training.")
+        return
     
     # Setup trainer
     trainer = GRPOTrainer(
@@ -702,47 +761,68 @@ def run_training(args: argparse.Namespace) -> None:
     # Train
     trainer.train()
     
-    # Optionally merge
+    # Optionally merge LoRA into base model
     if args.merge_for_vllm and args.merged_output_dir:
         merge_lora_adapter(
             base_model=args.model,
-            adapter_dir=args.output_dir,
+            adapter_dir=str(Path(args.output_dir) / "final"),
             merged_output_dir=args.merged_output_dir,
         )
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="GRPO Training with LoRA")
+    """Build argument parser for CLI usage."""
+    parser = argparse.ArgumentParser(
+        description="GRPO Training with LoRA for TextArena self-play traces"
+    )
     
     # Model arguments
-    parser.add_argument("--model", type=str, required=True, help="Base model name or path")
-    parser.add_argument("--data", type=str, required=True, help="Path to training data JSONL")
-    parser.add_argument("--output-dir", type=str, required=True, help="Output directory for LoRA adapter")
+    parser.add_argument("--model", type=str, required=True,
+                        help="Base model name or path (e.g., Qwen/Qwen3-8B)")
+    parser.add_argument("--data", type=str, required=True,
+                        help="Path to training data JSONL")
+    parser.add_argument("--output-dir", type=str, required=True,
+                        help="Output directory for LoRA adapter")
     
     # Training arguments
-    parser.add_argument("--epochs", type=int, default=1)
-    parser.add_argument("--batch-size", type=int, default=2)
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
-    parser.add_argument("--learning-rate", type=float, default=1e-5)
-    parser.add_argument("--max-prompt-length", type=int, default=1024)
-    parser.add_argument("--max-completion-length", type=int, default=256)
-    parser.add_argument("--logging-steps", type=int, default=10)
-    parser.add_argument("--save-steps", type=int, default=100)
-    parser.add_argument("--bf16", action="store_true")
+    parser.add_argument("--epochs", type=int, default=1,
+                        help="Number of training epochs")
+    parser.add_argument("--batch-size", type=int, default=2,
+                        help="Batch size per device")
+    parser.add_argument("--gradient-accumulation-steps", type=int, default=8,
+                        help="Gradient accumulation steps")
+    parser.add_argument("--learning-rate", type=float, default=1e-5,
+                        help="Learning rate")
+    parser.add_argument("--max-prompt-length", type=int, default=1024,
+                        help="Maximum prompt length in tokens")
+    parser.add_argument("--max-completion-length", type=int, default=256,
+                        help="Maximum completion length in tokens")
+    parser.add_argument("--logging-steps", type=int, default=10,
+                        help="Log every N optimizer steps")
+    parser.add_argument("--save-steps", type=int, default=100,
+                        help="Save checkpoint every N optimizer steps")
+    parser.add_argument("--bf16", action="store_true",
+                        help="Use bfloat16 precision")
     
     # LoRA arguments
-    parser.add_argument("--lora-r", type=int, default=16)
-    parser.add_argument("--lora-alpha", type=int, default=32)
-    parser.add_argument("--lora-dropout", type=float, default=0.05)
+    parser.add_argument("--lora-r", type=int, default=16,
+                        help="LoRA rank")
+    parser.add_argument("--lora-alpha", type=int, default=32,
+                        help="LoRA alpha (scaling factor)")
+    parser.add_argument("--lora-dropout", type=float, default=0.05,
+                        help="LoRA dropout")
     
     # Merge arguments
-    parser.add_argument("--merge-for-vllm", action="store_true", help="Merge LoRA into base model after training")
-    parser.add_argument("--merged-output-dir", type=str, default="", help="Output dir for merged model")
+    parser.add_argument("--merge-for-vllm", action="store_true",
+                        help="Merge LoRA into base model after training")
+    parser.add_argument("--merged-output-dir", type=str, default="",
+                        help="Output directory for merged model")
     
     return parser
 
 
 def main() -> None:
+    """CLI entry point."""
     parser = build_parser()
     args = parser.parse_args()
     run_training(args)
