@@ -721,16 +721,16 @@ def run_training(args: argparse.Namespace) -> None:
     Can be called from online_grpo_loop.py or directly via CLI.
     """
     
-    # Setup policy model with LoRA
-    # policy_model, tokenizer = setup_model_with_lora(
-    #     model_name=args.model,
-    #     lora_r=args.lora_r,
-    #     lora_alpha=args.lora_alpha,
-    #     lora_dropout=args.lora_dropout,
-    # )
+    #Setup policy model with LoRA
+    policy_model, tokenizer = setup_model_with_lora(
+        model_name=args.model,
+        lora_r=args.lora_r,
+        lora_alpha=args.lora_alpha,
+        lora_dropout=args.lora_dropout,
+    )
     
     # Setup frozen reference model
-    #ref_model = setup_reference_model(args.model)
+    ref_model = setup_reference_model(args.model)
     
     # Nur Tokenizer laden - dauert Sekunden, braucht kein GPU
     tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
@@ -749,84 +749,32 @@ def run_training(args: argparse.Namespace) -> None:
     if len(train_dataset) == 0:
         print("[WARNING] No training samples found! Skipping training.")
         return
-    
-    
-    # ============================================================
-    # DEBUG: Ersten Record inspizieren
-    # ============================================================
-    print("\n" + "=" * 60)
-    print("DEBUG: Inspektion von train_dataset[0]")
-    print("=" * 60)
-
-    sample = train_dataset[0]
-
-    print("\n--- FELDER IM SAMPLE ---")
-    for key, value in sample.items():
-        if isinstance(value, torch.Tensor):
-            print(f"{key}:")
-            print(f"  Type:  Tensor")
-            print(f"  Shape: {value.shape}")
-            print(f"  Dtype: {value.dtype}")
-        else:
-            print(f"{key}: {value}")
-
-    print("\n--- INPUT_IDS (erste 20 Token-IDs) ---")
-    print(sample["input_ids"][:20])
-
-    print("\n--- INPUT_IDS DEKODIERT (erste 200 Zeichen) ---")
-    decoded = tokenizer.decode(sample["input_ids"], skip_special_tokens=False)
-    print(decoded[:200] + "...")
-
-    print("\n--- ATTENTION_MASK (erste 20 Werte) ---")
-    print(sample["attention_mask"][:20])
-
-    print("\n--- LABELS (erste 20 Werte) ---")
-    print(sample["labels"][:20])
-    print("(-100 bedeutet: ignorieren beim Loss)")
-
-    print("\n--- LABELS DEKODIERT (nur Response, erste 200 Zeichen) ---")
-    # Filtere -100 raus und dekodiere nur die Response
-    response_ids = sample["labels"][sample["labels"] != -100]
-    decoded_response = tokenizer.decode(response_ids, skip_special_tokens=False)
-    print(decoded_response[:200] + "...")
-
-    print("\n--- ADVANTAGE ---")
-    print(f"Wert: {sample['advantage'].item():.4f}")
-    print("(positiv = Gewinner, negativ = Verlierer)")
-
-    print("\n--- PROMPT_LENGTH ---")
-    print(f"Wert: {sample['prompt_length']}")
-    print("(Anzahl Tokens in der Observation)")
-
-    print("\n" + "=" * 60)
-    print("DEBUG ENDE")
-    print("=" * 60)
     # Setup trainer
-    # trainer = GRPOTrainer(
-    #     policy_model=policy_model,
-    #     ref_model=ref_model,
-    #     tokenizer=tokenizer,
-    #     train_dataset=train_dataset,
-    #     output_dir=args.output_dir,
-    #     epochs=args.epochs,
-    #     batch_size=args.batch_size,
-    #     gradient_accumulation_steps=args.gradient_accumulation_steps,
-    #     learning_rate=args.learning_rate,
-    #     logging_steps=args.logging_steps,
-    #     save_steps=args.save_steps,
-    #     bf16=args.bf16,
-    # )
+    trainer = GRPOTrainer(
+        policy_model=policy_model,
+        ref_model=ref_model,
+        tokenizer=tokenizer,
+        train_dataset=train_dataset,
+        output_dir=args.output_dir,
+        epochs=args.epochs,
+        batch_size=args.batch_size,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
+        learning_rate=args.learning_rate,
+        logging_steps=args.logging_steps,
+        save_steps=args.save_steps,
+        bf16=args.bf16,
+    )
     
     # Train
-    #trainer.train()
+    trainer.train()
     
     # Optionally merge LoRA into base model
-    # if args.merge_for_vllm and args.merged_output_dir:
-    #     merge_lora_adapter(
-    #         base_model=args.model,
-    #         adapter_dir=str(Path(args.output_dir) / "final"),
-    #         merged_output_dir=args.merged_output_dir,
-    #     )
+    if args.merge_for_vllm and args.merged_output_dir:
+        merge_lora_adapter(
+            base_model=args.model,
+            adapter_dir=str(Path(args.output_dir) / "final"),
+            merged_output_dir=args.merged_output_dir,
+        )
 
 
 def build_parser() -> argparse.ArgumentParser:
