@@ -10,8 +10,8 @@ SRC = ROOT / "src"
 if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
-from scripts.self_play_textarena import run_self_play
-from scripts.full_training_grpo_lora import merge_lora_adapter, run_training
+from self_play_textarena import run_self_play
+from train_grpo_lora import merge_lora_adapter, run_training
 
 
 def concat_jsonl(files: list[Path], output_file: Path) -> None:
