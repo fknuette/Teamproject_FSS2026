@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
@@ -96,6 +97,72 @@ def _normalize_rewards(rewards: Any) -> dict[int, float]:
     raise ValueError(f"Unsupported rewards format: {type(rewards)}")
 
 
+# ===== INVALID MOVE HANDLING START =====
+
+ATTEMPTED_INVALID_AT_END_RE = re.compile(
+    r"\[GAME\] Player (?P<pid>\d+) attempted an invalid move\. "
+    r"Reason: .*?Please resubmit a valid move and remember to follow the game rules to avoid penalties\.\s*$",
+    re.DOTALL,
+)
+
+ELIMINATED_INVALID_RE = re.compile(
+    r"^\[GAME\] Player (?P<pid>\d+) has been eliminated by making an invalid move\.\.?$"
+)
+
+
+def _extract_invalid_pid_from_attempted_at_end(observation: str) -> int | None:
+    match = ATTEMPTED_INVALID_AT_END_RE.search(observation)
+    return int(match.group("pid")) if match else None
+
+
+def _extract_eliminated_invalid_lines(observation: str) -> set[str]:
+    return {
+        line.strip()
+        for line in observation.splitlines()
+        if line.strip() and ELIMINATED_INVALID_RE.match(line.strip())
+    }
+
+
+def _extract_invalid_pid_from_eliminated_line(line: str) -> int | None:
+    match = ELIMINATED_INVALID_RE.match(line)
+    return int(match.group("pid")) if match else None
+
+
+def _mark_last_turn_invalid(
+    game_records: list[TurnRecord],
+    invalid_turn_ids: set[int],
+    player_id: int,
+) -> None:
+    for rec in reversed(game_records):
+        if rec.player_id == player_id:
+            invalid_turn_ids.add(rec.turn_id)
+            return
+
+
+def _update_invalid_turn_tracking(
+    observation: str,
+    player_id: int,
+    game_records: list[TurnRecord],
+    invalid_turn_ids: set[int],
+    seen_eliminated_lines_by_player: dict[int, set[str]],
+) -> None:
+    attempted_invalid_pid = _extract_invalid_pid_from_attempted_at_end(observation)
+    if attempted_invalid_pid is not None:
+        _mark_last_turn_invalid(game_records, invalid_turn_ids, attempted_invalid_pid)
+
+    current_eliminated_lines = _extract_eliminated_invalid_lines(observation)
+    new_eliminated_lines = current_eliminated_lines - seen_eliminated_lines_by_player[player_id]
+
+    for line in new_eliminated_lines:
+        eliminated_pid = _extract_invalid_pid_from_eliminated_line(line)
+        if eliminated_pid is not None:
+            _mark_last_turn_invalid(game_records, invalid_turn_ids, eliminated_pid)
+
+    seen_eliminated_lines_by_player[player_id] = current_eliminated_lines
+
+# ===== INVALID MOVE HANDLING END =====
+
+
 def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -122,8 +189,24 @@ def run_self_play(args: argparse.Namespace) -> None:
         done = False
         turn_id = 0
 
+        # ===== INVALID MOVE HANDLING START =====
+        invalid_turn_ids: set[int] = set()
+        seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents}
+        # ===== INVALID MOVE HANDLING END =====
+
         while not done:
             player_id, observation = env.get_observation()
+
+            # ===== INVALID MOVE HANDLING START =====
+            _update_invalid_turn_tracking(
+                observation=observation,
+                player_id=player_id,
+                game_records=game_records,
+                invalid_turn_ids=invalid_turn_ids,
+                seen_eliminated_lines_by_player=seen_eliminated_lines_by_player,
+            )
+            # ===== INVALID MOVE HANDLING END =====
+
             agent_out = agents[player_id](observation)
             done, _ = env.step(action=agent_out["action"])
 
@@ -144,6 +227,11 @@ def run_self_play(args: argparse.Namespace) -> None:
         for record in game_records:
             record.reward = reward_map.get(record.player_id, 0.0)
 
+            # ===== INVALID MOVE HANDLING START =====
+            if record.turn_id in invalid_turn_ids:
+                record.reward = -1.0
+            # ===== INVALID MOVE HANDLING END =====
+
         all_records.extend(game_records)
 
     with output_path.open("w", encoding="utf-8") as f:
@@ -163,7 +251,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--top-p", type=float, default=0.95)
     parser.add_argument("--max-new-tokens", type=int, default=256)
-    parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument("--tensor-parallel-size", type=int, default=2)
     return parser
 
 
