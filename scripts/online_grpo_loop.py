@@ -11,7 +11,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 from self_play_textarena import run_self_play
-from train_grpo_lora import merge_lora_adapter, run_training
+from grpo_training.cli import run_training
+from grpo_training.models import merge_lora_adapter
 
 
 def concat_jsonl(files: list[Path], output_file: Path) -> None:
@@ -99,6 +100,7 @@ def main() -> None:
 
         train_args = argparse.Namespace(
             model=policy_model,
+            old_policy_model=policy_model,  # Model that generated the rollout data
             data=str(merged_dataset),
             output_dir=str(adapter_out),
             epochs=args.epochs,
