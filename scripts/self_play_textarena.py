@@ -19,6 +19,7 @@ from textarena.core import Agent
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
+from argument_parser import build_parser
 from teamproject_fss2026.textarena_utils import build_agent_prompt, parse_model_response
 
 
@@ -241,22 +242,9 @@ def run_self_play(args: argparse.Namespace) -> None:
     print(f"Wrote {len(all_records)} turn records to {output_path}")
 
 
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Collect TextArena self-play traces with vLLM.")
-    parser.add_argument("--env-id", type=str, default="TicTacToe-v0")
-    parser.add_argument("--model-a", type=str, required=True)
-    parser.add_argument("--model-b", type=str, required=True)
-    parser.add_argument("--num-games", type=int, default=50)
-    parser.add_argument("--output", type=str, default="data/selfplay_traces.jsonl")
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--top-p", type=float, default=0.95)
-    parser.add_argument("--max-new-tokens", type=int, default=256)
-    parser.add_argument("--tensor-parallel-size", type=int, default=2)
-    return parser
-
-
 def main() -> None:
-    parser = build_parser()
+    """CLI entry point for self-play trace collection."""
+    parser = build_parser(context="self_play")
     args = parser.parse_args()
     run_self_play(args)
 
