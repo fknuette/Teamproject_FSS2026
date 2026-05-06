@@ -7,6 +7,7 @@ from pathlib import Path
 
 from transformers import AutoTokenizer
 
+from argument_parser import build_parser
 from grpo_training.data import GRPODataset
 from grpo_training.models import (
     setup_model_with_lora,
@@ -87,69 +88,8 @@ def run_training(args: argparse.Namespace) -> None:
         )
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Build argument parser for CLI usage."""
-    parser = argparse.ArgumentParser(
-        description="GRPO Training with LoRA for TextArena self-play traces"
-    )
-    
-    # Model arguments
-    # parser.add_argument("--model", type=str, required=True,
-    #                     help="Base model name or path (e.g., Qwen/Qwen3-8B)")
-    # parser.add_argument("--data", type=str, required=True,
-    #                     help="Path to training data JSONL")
-    # parser.add_argument("--output-dir", type=str, required=True,
-    #                     help="Output directory for LoRA adapter")
-    parser.add_argument("--model", type=str, default="Qwen/Qwen3-8B",
-                    help="Base model name or path (e.g., Qwen/Qwen3-8B)")
-    parser.add_argument("--data", type=str, default="runs/online_grpo/datasets/train_until_iter_1.jsonl",
-                    help="Path to training data JSONL")
-    parser.add_argument("--output-dir", type=str, default="runs/online_grpo/checkpoints/test",
-                    help="Output directory for LoRA adapter")
-    
-    # Training arguments
-    parser.add_argument("--epochs", type=int, default=1,
-                        help="Number of training epochs")
-    parser.add_argument("--batch-size", type=int, default=2,
-                        help="Batch size per device")
-    parser.add_argument("--gradient-accumulation-steps", type=int, default=8,
-                        help="Gradient accumulation steps")
-    parser.add_argument("--learning-rate", type=float, default=1e-5,
-                        help="Learning rate")
-    parser.add_argument("--max-prompt-length", type=int, default=1024,
-                        help="Maximum prompt length in tokens")
-    parser.add_argument("--max-completion-length", type=int, default=256,
-                        help="Maximum completion length in tokens")
-    parser.add_argument("--logging-steps", type=int, default=10,
-                        help="Log every N optimizer steps")
-    parser.add_argument("--save-steps", type=int, default=100,
-                        help="Save checkpoint every N optimizer steps")
-    parser.add_argument("--bf16", action="store_true",
-                        help="Use bfloat16 precision")
-    
-    # LoRA arguments
-    parser.add_argument("--lora-r", type=int, default=16,
-                        help="LoRA rank")
-    parser.add_argument("--lora-alpha", type=int, default=32,
-                        help="LoRA alpha (scaling factor)")
-    parser.add_argument("--lora-dropout", type=float, default=0.05,
-                        help="LoRA dropout")
-    
-    # Old policy model (checkpoint that generated the rollout data)
-    parser.add_argument("--old-policy-model", type=str, default=None,
-                        help="Checkpoint that generated the rollout data (for GRPO ratio computation)")
-    
-    # Merge arguments
-    parser.add_argument("--merge-for-vllm", action="store_true",
-                        help="Merge LoRA into base model after training")
-    parser.add_argument("--merged-output-dir", type=str, default="",
-                        help="Output directory for merged model")
-    
-    return parser
-
-
 def main() -> None:
-    """CLI entry point."""
-    parser = build_parser()
+    """CLI entry point for training."""
+    parser = build_parser(context="cli")
     args = parser.parse_args()
     run_training(args)
