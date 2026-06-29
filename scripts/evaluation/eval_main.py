@@ -6,13 +6,12 @@ import argparse
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]
-SRC = ROOT / "src"
-if str(SRC) not in sys.path:
-    sys.path.insert(0, str(SRC))
+ROOT = Path(__file__).resolve().parents[1]  # scripts/
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
-from evaluation.agent_factory import AgentFactory
-from evaluation.matchmaker import SimplePairMatchmaker
+from agent_factory import AgentFactory
+from matchmaker import SimplePairMatchmaker
 from self_play_textarena import run_eval_games
 
 
@@ -20,11 +19,16 @@ def main() -> None:
     """Main entry point for evaluation."""
     parser = argparse.ArgumentParser(description="Run evaluation games")
     
+    # Determine default paths
+    root_dir = Path(__file__).resolve().parents[2]  # scripts/ parent
+    default_checkpoint_dir = root_dir / "scripts" / "runs" / "online_grpo" / "checkpoints"
+    default_output_dir = root_dir / "scripts" / "runs" / "online_grpo" / "evals"
+    
     parser.add_argument(
         "--eval-checkpoint",
         type=str,
-        required=True,
-        help="Checkpoint being evaluated (e.g., 'runs/online_grpo/checkpoints/iter_1/lora_adapter/final')",
+        default=str(default_checkpoint_dir / "iter_1" / "lora_adapter" / "final"),
+        help=f"Checkpoint being evaluated (default: {default_checkpoint_dir}/iter_1/lora_adapter/final)",
     )
     parser.add_argument(
         "--baseline-checkpoint",
@@ -35,8 +39,8 @@ def main() -> None:
     parser.add_argument(
         "--output-dir",
         type=str,
-        required=True,
-        help="Directory to save eval results",
+        default=str(default_output_dir / "iter_1_vs_base"),
+        help=f"Directory to save eval results (default: {default_output_dir}/iter_1_vs_base)",
     )
     parser.add_argument(
         "--tensor-parallel-size",
