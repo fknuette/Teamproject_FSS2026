@@ -36,6 +36,23 @@ class TurnRecord:
     turn_id: int = 0
 
 
+@dataclass
+class PlayerInfo:
+    """Information about a player in an eval game."""
+    player_id: int
+    checkpoint: str  # checkpoint_id
+    team: str  # "team_a" or "team_b"
+    role: str  # "werewolf" or "villager"
+
+
+@dataclass
+class GameResult:
+    """Result of an eval game."""
+    game_id: int
+    winning_team: str  # "team_a" or "team_b"
+    players: list[PlayerInfo]  # All 6 players with their info
+
+
 class VLLMTextArenaAgent(Agent):
     def __init__(self, llm: LLM, tokinizer: AutoTokenizer) -> None:
         super().__init__()
@@ -271,6 +288,129 @@ def run_self_play(args: argparse.Namespace) -> None:
             torch.cuda.empty_cache()
         except Exception:
             pass
+
+
+def run_eval_games(
+    matchups_dict: dict,
+    output_path: Path,
+    tensor_parallel_size: int = 1,
+) -> None:
+    """Run evaluation games with different agents per player.
+    
+    Args:
+        matchups_dict: Dict mapping Matchup objects to number of games.
+                      Matchup contains AgentConfig for each of 6 players with role/team info.
+        output_path: Path to save game results JSON.
+        tensor_parallel_size: Number of GPUs for tensor parallelism.
+    """
+    from evaluation.matchmaker import Matchup, AgentConfig
+    from evaluation.agent_factory import AgentFactory
+    
+    env_id = "Mafia"  # Fixed environment ID
+    
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize agent factory
+    factory = AgentFactory(tensor_parallel_size=tensor_parallel_size)
+    
+    all_results: list[GameResult] = []
+    global_game_id = 0
+    
+    # Iterate over each matchup and number of games
+    for matchup, num_games in matchups_dict.items():
+        # Build agent mapping: player_id -> (checkpoint_id, agent, team, role)
+        agent_configs: dict[int, tuple[str, VLLMTextArenaAgent, str, str]] = {}
+        
+        for agent_config in matchup.agents:
+            agent = factory.create_agent(agent_config.checkpoint_id)
+            agent_configs[agent_config.player_idx] = (
+                agent_config.checkpoint_id,
+                agent,
+                agent_config.team,
+                agent_config.role,
+            )
+        
+        # Determine team assignments
+        team_a_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_a"
+        )
+        team_b_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_b"
+        )
+        
+        # Play num_games games for this matchup
+        for game_in_matchup in range(num_games):
+            env = ta.make(env_id)
+            env.reset(num_players=6)
+            
+            agents: dict[int, VLLMTextArenaAgent] = {}
+            for player_id in range(6):
+                _, agent, _, _ = agent_configs[player_id]
+                agents[player_id] = agent
+            
+            done = False
+            
+            # ===== INVALID MOVE HANDLING START =====
+            invalid_turn_ids: set[int] = set()
+            seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents}
+            # ===== INVALID MOVE HANDLING END =====
+            
+            turn_id = 0
+            
+            while not done:
+                player_id, observation = env.get_observation()
+                
+                # ===== INVALID MOVE HANDLING START =====
+                _update_invalid_turn_tracking(
+                    observation=observation,
+                    player_id=player_id,
+                    game_records=[],
+                    invalid_turn_ids=invalid_turn_ids,
+                    seen_eliminated_lines_by_player=seen_eliminated_lines_by_player,
+                )
+                # ===== INVALID MOVE HANDLING END =====
+                
+                agent_out = agents[player_id](observation)
+                done, _ = env.step(action=agent_out["action"])
+                turn_id += 1
+            
+            rewards, game_info = env.close()
+            reward_map = _normalize_rewards(rewards)
+            
+            # Determine winning team based on rewards
+            team_a_reward = sum(reward_map.get(pid, 0.0) for pid in team_a_players)
+            team_b_reward = sum(reward_map.get(pid, 0.0) for pid in team_b_players)
+            winning_team = "team_a" if team_a_reward > team_b_reward else "team_b"
+            
+            # Create player info for all players
+            players_info = []
+            for player_id in range(6):
+                checkpoint_id, _, team, role = agent_configs[player_id]
+                players_info.append(
+                    PlayerInfo(
+                        player_id=player_id,
+                        checkpoint=checkpoint_id,
+                        team=team,
+                        role=role,
+                    )
+                )
+            
+            result = GameResult(
+                game_id=global_game_id,
+                winning_team=winning_team,
+                players=players_info,
+            )
+            
+            all_results.append(result)
+            global_game_id += 1
+    
+    # Save all results to single file
+    with output_path.open("w", encoding="utf-8") as f:
+        for result in all_results:
+            f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
+    
+    print(f"Wrote {len(all_results)} eval game results to {output_path}")
 
 
 def main() -> None:
