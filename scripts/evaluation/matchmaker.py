@@ -4,10 +4,10 @@ from __future__ import annotations
 
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from typing import List, Tuple
+from typing import List
 
 
-@dataclass
+@dataclass(frozen=True)
 class AgentConfig:
     """Configuration for an agent in a matchup."""
     
@@ -17,16 +17,11 @@ class AgentConfig:
     role: str  # "werewolf" or "villager"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Matchup:
-    """Represents a matchup between two teams with specific roles.
+    """Represents a matchup between two teams with specific roles."""
     
-    A matchup defines the team composition and roles for a set of games.
-    The number of games to play with this matchup is provided separately
-    by the matchmaker as dict[Matchup, int].
-    """
-    
-    agents: List[AgentConfig]  # All 6 agents with their roles
+    agents: tuple  # All 6 agents with their roles
 
 
 class Matchmaker(ABC):
@@ -37,70 +32,34 @@ class Matchmaker(ABC):
         self,
         eval_checkpoint: str,
         available_checkpoints: List[str] | None = None,
-    ) -> dict[Matchup, int]:
-        """Generate matchups for evaluation.
-        
-        Args:
-            eval_checkpoint: The checkpoint being evaluated.
-            available_checkpoints: Optional list of available checkpoints.
-            
-        Returns:
-            Dict mapping Matchup objects to number of games to play.
-        """
+    ) -> dict:
+        """Generate matchups for evaluation."""
         pass
 
 
 class SimplePairMatchmaker(Matchmaker):
-    """Matches eval_checkpoint vs a single baseline checkpoint.
-    
-    Strategy:
-    - Eval checkpoint always forms a complete team (either all Werewolves or all Villagers)
-    - Baseline checkpoint forms the opposing team
-    - Fixed game configuration (change in code if needed)
-    
-    Team composition (6 players):
-    - Werewolf team: 2 players
-    - Villager team: 4 players
-    """
+    """Matches eval_checkpoint vs a single baseline checkpoint."""
     
     # Game configuration - modify here to change evaluation settings
     NUM_WEREWOLVES = 2
     NUM_VILLAGERS = 4
-    NUM_GAMES_EVAL_WEREWOLF = 50
-    NUM_GAMES_EVAL_VILLAGER = 50
+    NUM_GAMES_EVAL_WEREWOLF = 2
+    NUM_GAMES_EVAL_VILLAGER = 2
     
-    def __init__(
-        self,
-        baseline_checkpoint: str = "Qwen/Qwen3-8B",
-    ):
-        """Initialize SimplePairMatchmaker.
-        
-        Args:
-            baseline_checkpoint: Checkpoint to play against.
-        
-        To change game configuration, modify class constants:
-        - NUM_WEREWOLVES
-        - NUM_VILLAGERS
-        - NUM_GAMES_EVAL_WEREWOLF
-        - NUM_GAMES_EVAL_VILLAGER
-        """
+    def __init__(self, baseline_checkpoint: str = "Qwen/Qwen3-8B"):
         self.baseline_checkpoint = baseline_checkpoint
     
     def get_matchups(
         self,
         eval_checkpoint: str,
-        available_checkpoints: list[str] | None = None,
-    ) -> dict[Matchup, int]:
-        """Generate matchups: eval vs baseline with role separation.
-        
-        Returns dict with matchups and game counts based on class configuration.
-        """
+        available_checkpoints: List[str] | None = None,
+    ) -> dict:
+        """Generate matchups: eval vs baseline with role separation."""
         matchups_dict = {}
         
         # Matchup 1: eval as Werewolves, baseline as Villagers
         if self.NUM_GAMES_EVAL_WEREWOLF > 0:
             agents_werewolf = []
-            # Eval werewolves
             for i in range(self.NUM_WEREWOLVES):
                 agents_werewolf.append(
                     AgentConfig(
@@ -110,7 +69,6 @@ class SimplePairMatchmaker(Matchmaker):
                         role="werewolf",
                     )
                 )
-            # Baseline villagers
             for i in range(self.NUM_VILLAGERS):
                 agents_werewolf.append(
                     AgentConfig(
@@ -121,13 +79,12 @@ class SimplePairMatchmaker(Matchmaker):
                     )
                 )
             
-            matchup_werewolf = Matchup(agents=agents_werewolf)
+            matchup_werewolf = Matchup(agents=tuple(agents_werewolf))
             matchups_dict[matchup_werewolf] = self.NUM_GAMES_EVAL_WEREWOLF
         
         # Matchup 2: eval as Villagers, baseline as Werewolves
         if self.NUM_GAMES_EVAL_VILLAGER > 0:
             agents_villager = []
-            # Baseline werewolves
             for i in range(self.NUM_WEREWOLVES):
                 agents_villager.append(
                     AgentConfig(
@@ -137,7 +94,6 @@ class SimplePairMatchmaker(Matchmaker):
                         role="werewolf",
                     )
                 )
-            # Eval villagers
             for i in range(self.NUM_VILLAGERS):
                 agents_villager.append(
                     AgentConfig(
@@ -148,7 +104,7 @@ class SimplePairMatchmaker(Matchmaker):
                     )
                 )
             
-            matchup_villager = Matchup(agents=agents_villager)
+            matchup_villager = Matchup(agents=tuple(agents_villager))
             matchups_dict[matchup_villager] = self.NUM_GAMES_EVAL_VILLAGER
         
         return matchups_dict
