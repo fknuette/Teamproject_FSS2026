@@ -1,0 +1,82 @@
+"""Main orchestration for evaluation runs."""
+
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+import sys
+
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+
+from evaluation.agent_factory import AgentFactory
+from evaluation.matchmaker import SimplePairMatchmaker
+from self_play_textarena import run_eval_games
+
+
+def main() -> None:
+    """Main entry point for evaluation."""
+    parser = argparse.ArgumentParser(description="Run evaluation games")
+    
+    parser.add_argument(
+        "--eval-checkpoint",
+        type=str,
+        required=True,
+        help="Checkpoint being evaluated (e.g., 'runs/online_grpo/checkpoints/iter_1/lora_adapter/final')",
+    )
+    parser.add_argument(
+        "--baseline-checkpoint",
+        type=str,
+        default="Qwen/Qwen3-8B",
+        help="Baseline checkpoint to play against",
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        required=True,
+        help="Directory to save eval results",
+    )
+    parser.add_argument(
+        "--tensor-parallel-size",
+        type=int,
+        default=1,
+        help="Number of GPUs for tensor parallelism",
+    )
+    
+    args = parser.parse_args()
+    
+    # Create output directory
+    output_dir = Path(args.output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Create matchmaker with defaults
+    matchmaker = SimplePairMatchmaker(
+        baseline_checkpoint=args.baseline_checkpoint,
+    )
+    
+    # Get matchups
+    matchups_dict = matchmaker.get_matchups(args.eval_checkpoint)
+    
+    print(f"Evaluating checkpoint: {args.eval_checkpoint}")
+    print(f"vs Baseline: {args.baseline_checkpoint}")
+    print(f"Output directory: {output_dir}")
+    print()
+    
+    # Run evaluation games
+    output_path = output_dir / "results.jsonl"
+    
+    print(f"Running evaluation...")
+    run_eval_games(
+        matchups_dict=matchups_dict,
+        output_path=output_path,
+        tensor_parallel_size=args.tensor_parallel_size,
+    )
+    
+    print(f"Results saved to {output_path}")
+    print("Evaluation complete!")
+
+
+if __name__ == "__main__":
+    main()
