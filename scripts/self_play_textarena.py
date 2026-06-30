@@ -294,6 +294,7 @@ def run_eval_games(
     matchups_dict: dict,
     output_path: Path,
     tensor_parallel_size: int = 1,
+    gpu_memory_utilization: float = 0.6,
 ) -> None:
     """Run evaluation games with different agents per player.
     
@@ -306,13 +307,16 @@ def run_eval_games(
     from evaluation.matchmaker import Matchup, AgentConfig
     from evaluation.agent_factory import AgentFactory
     
-    env_id = "Mafia"  # Fixed environment ID
+    env_id = "SecretMafia-v0"  # Fixed environment ID (use registered textarena env)
     
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     
     # Initialize agent factory
-    factory = AgentFactory(tensor_parallel_size=tensor_parallel_size)
+    factory = AgentFactory(
+        tensor_parallel_size=tensor_parallel_size,
+        gpu_memory_utilization=gpu_memory_utilization,
+    )
     
     all_results: list[GameResult] = []
     global_game_id = 0

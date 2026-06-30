@@ -48,6 +48,12 @@ def main() -> None:
         default=1,
         help="Number of GPUs for tensor parallelism",
     )
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=0.3,
+        help="GPU memory utilization ratio for vLLM startup (0-1)",
+    )
     
     args = parser.parse_args()
     
@@ -76,6 +82,7 @@ def main() -> None:
         matchups_dict=matchups_dict,
         output_path=output_path,
         tensor_parallel_size=args.tensor_parallel_size,
+        gpu_memory_utilization=args.gpu_memory_utilization,
     )
     
     print(f"Results saved to {output_path}")
