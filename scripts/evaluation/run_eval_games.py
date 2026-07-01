@@ -1,0 +1,131 @@
+"""Evaluation games orchestration."""
+
+from __future__ import annotations
+
+import json
+from dataclasses import asdict, dataclass
+from pathlib import Path
+from typing import TYPE_CHECKING
+
+import textarena as ta
+
+if TYPE_CHECKING:
+    from self_play_textarena import VLLMTextArenaAgent
+
+
+@dataclass
+class PlayerInfo:
+    """Information about a player in an eval game."""
+    player_id: int
+    checkpoint: str  # checkpoint_id
+    team: str  # "team_a" or "team_b"
+    role: str  # "werewolf" or "villager"
+
+
+@dataclass
+class GameResult:
+    """Result of an eval game."""
+    game_id: int
+    winning_team: str  # "team_a" or "team_b"
+    players: list[PlayerInfo]  # All players with their info
+
+
+def run_eval_games(
+    matchups_dict: dict,
+    output_path: Path,
+    tensor_parallel_size: int = 1,
+    gpu_memory_utilization: float = 0.6,
+) -> None:
+    """Run evaluation games with different agents per player.
+    
+    Args:
+        matchups_dict: Dict mapping Matchup objects to number of games.
+                      Matchup contains AgentConfig for each player with role/team info.
+        output_path: Path to save game results JSON.
+        tensor_parallel_size: Number of GPUs for tensor parallelism.
+        gpu_memory_utilization: GPU memory utilization ratio for vLLM.
+    """
+    from self_play_textarena import _simulate_game
+    from matchmaker import Matchup, AgentConfig
+    from agent_factory import AgentFactory
+    
+    env_id = "SecretMafia-v0"  # Fixed environment ID (use registered textarena env)
+    
+    output_path = Path(output_path)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    # Initialize agent factory
+    factory = AgentFactory(
+        tensor_parallel_size=tensor_parallel_size,
+        gpu_memory_utilization=gpu_memory_utilization,
+    )
+    
+    all_results: list[GameResult] = []
+    global_game_id = 0
+    
+    # Iterate over each matchup and number of games
+    for matchup, num_games in matchups_dict.items():
+        # Build agent mapping: player_id -> (checkpoint_id, agent, team, role)
+        agent_configs: dict[int, tuple[str, VLLMTextArenaAgent, str, str]] = {}
+        
+        for agent_config in matchup.agents:
+            agent = factory.create_agent(agent_config.checkpoint_id)
+            agent_configs[agent_config.player_idx] = (
+                agent_config.checkpoint_id,
+                agent,
+                agent_config.team,
+                agent_config.role,
+            )
+        
+        # Determine team assignments
+        team_a_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_a"
+        )
+        team_b_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_b"
+        )
+        
+        num_players = max(agent_configs) + 1
+
+        # Play num_games games for this matchup
+        for game_in_matchup in range(num_games):
+            agents: dict[int, VLLMTextArenaAgent] = {
+                player_id: agent_configs[player_id][1]
+                for player_id in range(num_players)
+            }
+
+            reward_map, _ = _simulate_game(global_game_id, agents, env_id, num_players=num_players)
+
+            # Determine winning team based on rewards
+            team_a_reward = sum(reward_map.get(pid, 0.0) for pid in team_a_players)
+            team_b_reward = sum(reward_map.get(pid, 0.0) for pid in team_b_players)
+            winning_team = "team_a" if team_a_reward > team_b_reward else "team_b"
+            
+            # Create player info for all players
+            players_info = []
+            for player_id in range(num_players):
+                checkpoint_id, _, team, role = agent_configs[player_id]
+                players_info.append(
+                    PlayerInfo(
+                        player_id=player_id,
+                        checkpoint=checkpoint_id,
+                        team=team,
+                        role=role,
+                    )
+                )
+            
+            result = GameResult(
+                game_id=global_game_id,
+                winning_team=winning_team,
+                players=players_info,
+            )
+            
+            all_results.append(result)
+            global_game_id += 1
+    
+    # Save all results to single file
+    with output_path.open("w", encoding="utf-8") as f:
+        for result in all_results:
+            f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
+    
+    print(f"Wrote {len(all_results)} eval game results to {output_path}")
