@@ -12,6 +12,7 @@ if str(ROOT) not in sys.path:
 
 from agent_factory import AgentFactory
 from matchmaker import SimplePairMatchmaker
+from result_analyzer import evaluate_simple_matchmaking_winrate
 from self_play_textarena import run_eval_games
 
 
@@ -86,6 +87,9 @@ def main() -> None:
     )
     
     print(f"Results saved to {output_path}")
+    print()
+    print(evaluate_simple_matchmaking_winrate(output_path))
+    print()
     print("Evaluation complete!")
 
 
