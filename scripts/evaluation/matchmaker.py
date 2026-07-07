@@ -46,7 +46,7 @@ class SimplePairMatchmaker(Matchmaker):
     NUM_GAMES_EVAL_WEREWOLF = 2
     NUM_GAMES_EVAL_VILLAGER = 2
     
-    def __init__(self, baseline_checkpoint: str = "Qwen/Qwen3-8B"):
+    def __init__(self, baseline_checkpoint: str = "Qwen/Qwen2.5-7B-Instruct"):
         self.baseline_checkpoint = baseline_checkpoint
     
     def get_matchups(

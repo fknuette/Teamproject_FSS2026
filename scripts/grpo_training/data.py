@@ -6,12 +6,16 @@ from __future__ import annotations
 
 import json
 import math
+import re
 from dataclasses import dataclass
+from typing import Literal
 
 import torch
 import torch.nn.functional as F
 from torch.utils.data import Dataset, DataLoader
 from transformers import AutoTokenizer
+
+from teamproject_fss2026.textarena_utils import build_agent_prompt
 
 
 @dataclass
@@ -132,12 +136,31 @@ class GRPODataset(Dataset):
     def __len__(self) -> int:
         return len(self.samples)
     
+    def _extract_phase(self, observation: str) -> Literal["Discuss", "Voting", "Action"]:
+        matches = re.findall(r'\[GAME\](.*?)(?=\n|$)', observation)
+        valid_matches = [m.strip() for m in matches if "invalid move" not in m.lower()]
+        if valid_matches:
+            phase_text = valid_matches[-1]
+            if "Voting phase" in phase_text:
+                return "Voting"
+            if "Discuss" in phase_text:
+                return "Discuss"
+        return "Action"
+    
     def __getitem__(self, idx: int) -> dict:
         sample = self.samples[idx]
+        phase = self._extract_phase(sample.observation)
+        formatted_prompt = build_agent_prompt(sample.observation, phase)
+        prompt_text = self.tokenizer.apply_chat_template(
+            formatted_prompt,
+            tokenize=False,
+            add_generation_prompt=True,
+            enable_thinking=False,
+        )
         
         # Tokenize observation (prompt)
         prompt_tokens = self.tokenizer(
-            sample.observation,
+            prompt_text,
             truncation=True,
             max_length=self.max_prompt_length,
             return_tensors="pt",

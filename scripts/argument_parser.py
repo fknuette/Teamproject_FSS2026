@@ -117,8 +117,8 @@ def _add_lora_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_model_data_args(parser: argparse.ArgumentParser) -> None:
     """Model and data arguments."""
-    parser.add_argument("--model", type=str, default="Qwen/Qwen3-8B",
-                       help="Base model name or path (e.g., Qwen/Qwen3-8B)")
+    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct",
+                       help="Base model name or path (e.g., Qwen/Qwen2.5-7B-Instruct)")
     parser.add_argument("--data", type=str, default="runs/online_grpo/datasets/train_until_iter_1.jsonl",
                        help="Path to training data JSONL")
     parser.add_argument("--output-dir", type=str, default="runs/online_grpo/checkpoints/test",

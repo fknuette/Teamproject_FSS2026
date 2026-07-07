@@ -44,8 +44,7 @@ def run_training(args: argparse.Namespace) -> None:
     # Setup frozen reference model for KL regularization
     ref_model = setup_reference_model(args.model)
     
-    # Nur Tokenizer laden - dauert Sekunden, braucht kein GPU
-    tokenizer = AutoTokenizer.from_pretrained("Qwen/Qwen3-8B", trust_remote_code=True)
+    # Reuse tokenizer from policy model setup
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
     
