@@ -34,7 +34,7 @@ def main() -> None:
     parser.add_argument(
         "--baseline-checkpoint",
         type=str,
-        default="Qwen/Qwen3-8B",
+        default="Qwen/Qwen2.5-7B-Instruct",
         help="Baseline checkpoint to play against",
     )
     parser.add_argument(

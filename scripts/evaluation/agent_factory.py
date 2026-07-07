@@ -49,7 +49,7 @@ class AgentFactory:
             checkpoint_path: Path to the checkpoint directory. Can be:
                 - LoRA adapter: directory with adapter_config.json
                 - Full model: directory with config.json
-                - HuggingFace model: "Qwen/Qwen3-8B"
+                - HuggingFace model: "Qwen/Qwen2.5-7B-Instruct"
             
         Returns:
             VLLMTextArenaAgent ready to play.
