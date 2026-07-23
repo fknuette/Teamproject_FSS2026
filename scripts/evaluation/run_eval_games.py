@@ -18,15 +18,15 @@ class PlayerInfo:
     """Information about a player in an eval game."""
     player_id: int
     checkpoint: str  # checkpoint_id
-    team: str  # "team_a" or "team_b"
-    role: str  # "werewolf" or "villager"
+    team: str  # "Mafia" or "Village"
+    role: str  # "Mafia" or "Villager"
 
 
 @dataclass
 class GameResult:
     """Result of an eval game."""
     game_id: int
-    winning_team: str  # "team_a" or "team_b"
+    winning_team: str  # "Mafia" or "Village"
     players: list[PlayerInfo]  # All players with their info
 
 
@@ -78,11 +78,11 @@ def run_eval_games(
             )
         
         # Determine team assignments
-        team_a_players = set(
-            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_a"
+        mafia_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "Mafia"
         )
-        team_b_players = set(
-            idx for idx, (_, _, team, _) in agent_configs.items() if team == "team_b"
+        villager_players = set(
+            idx for idx, (_, _, team, _) in agent_configs.items() if team == "Village"
         )
         
         num_players = max(agent_configs) + 1
@@ -94,12 +94,12 @@ def run_eval_games(
                 for player_id in range(num_players)
             }
 
-            reward_map, _ = _simulate_game(global_game_id, agents, env_id, num_players=num_players)
+            reward_map, _ = _simulate_game(global_game_id, agent_configs, env_id, num_players=num_players, is_eval=True)
 
             # Determine winning team based on rewards
-            team_a_reward = sum(reward_map.get(pid, 0.0) for pid in team_a_players)
-            team_b_reward = sum(reward_map.get(pid, 0.0) for pid in team_b_players)
-            winning_team = "team_a" if team_a_reward > team_b_reward else "team_b"
+            mafia_reward = sum(reward_map.get(pid, 0.0) for pid in mafia_players)
+            villager_reward = sum(reward_map.get(pid, 0.0) for pid in villager_players)
+            winning_team = "Mafia" if mafia_reward > villager_reward else "Village"
             
             # Create player info for all players
             players_info = []

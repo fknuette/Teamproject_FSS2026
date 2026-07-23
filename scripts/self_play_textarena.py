@@ -23,7 +23,7 @@ from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
 from argument_parser import build_parser
-from teamproject_fss2026.textarena_utils import build_agent_prompt, parse_model_response
+from teamproject_fss2026.textarena_utils import build_agent_prompt, parse_model_response, extract_phase
 
 
 @dataclass
@@ -42,18 +42,17 @@ class VLLMTextArenaAgent(Agent):
         self.llm = llm
         self.tokenizer = tokinizer
 
+    @property
+    def model_name(self) -> str:
+        """Extrahiert den geladenen Modellpfad/Namen aus vLLM."""
+        try:
+            return self.llm.llm_engine.model_config.model
+        except AttributeError:
+            return "Unbekanntes vLLM Modell"
+
     def __call__(self, observation: str) -> dict[str, str]:
         
-        # Findout in we will vote or not
-        matches = re.findall(r'\[GAME\](.*)(?=\n|$)', observation)
-        valid_matches = [m.strip() for m in matches if "invalid move" not in m.lower()]
-        phase_text = valid_matches[-1]
-        if "Voting phase" in phase_text:
-            phase = "Voting"
-        elif "Discuss" in phase_text:
-            phase = "Discuss"
-        else:
-            phase = "Action"
+        phase = extract_phase(observation)
 
         # Tag-Modus: Darf reden, stoppt nur am nächsten Block-Trenner
         if phase == "Discuss":
@@ -103,20 +102,52 @@ def _normalize_rewards(rewards: Any) -> dict[int, float]:
 
 def _simulate_game(
     game_id: int,
-    agents: dict[int, VLLMTextArenaAgent],
+    agents_or_config: Union[dict[int, VLLMTextArenaAgent], dict[int, tuple[str, VLLMTextArenaAgent, str, str]]],
     env_id: str,
     num_players: int = 8,
     num_mafia: int = 2,
+    is_eval: bool = False,
 ) -> tuple[dict[int, float], list[TurnRecord]]:
     """Run one game loop and return rewards plus turn records."""
     env = ta.make(env_id, mafia_ratio=args.num_mafia / args.num_players)
     env.reset(num_players=num_players)
     game_records: list[TurnRecord] = []
     invalid_turn_ids: set[int] = set()
-    seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents}
+    seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents_or_config}
     done = False
     turn_id = 0
 
+    if is_eval:
+        ta_assigned_roles = getattr(env, "roles", {})#env.roles#getattr(env.state, "roles", {})
+        print(f"Assigned roles: {ta_assigned_roles}")
+        agents: dict[int, VLLMTextArenaAgent] = {}
+        # Aufteilen der konfigurierten Agenten-Instanzen nach Teams
+        config_team_a = [cfg[1] for cfg in agents_or_config.values() if cfg[2] == "Mafia"]
+        config_team_b = [cfg[1] for cfg in agents_or_config.values() if cfg[2] == "Village"]
+
+        for ta_player_id, ta_role in ta_assigned_roles.items():
+            role_name = type(ta_role).__name__
+            if role_name == "Mafia":
+                # Mafia-IDs bekommen Modelle aus Team A
+                agents[ta_player_id] = config_team_a.pop(0)
+            else:
+                # Dorf-IDs (Villager, Doctor, etc.) bekommen Modelle aus Team B
+                agents[ta_player_id] = config_team_b.pop(0)
+        print(f"Assigned roles: {ta_assigned_roles}")
+        print(f"Agents mapping: {agents}")
+        for pid, agent_instance in agents.items():
+            # Holt den Klassennamen des Rollen-Objekts (z.B. "Mafia", "Doctor")
+            actual_role = type(env.roles[pid]).__name__
+        
+            # Liest den Modellpfad aus dem Agenten
+            agent_identity = agent_instance.model_name
+        
+            print(f"▶️ Spieler-ID {pid:2} | Rolle: {actual_role:<10} | Zugewiesenes Modell: {agent_identity}")
+    
+    else:
+        agents = agents_or_config  # Use the provided agents directly
+    
+    
     while not done:
         player_id, observation = env.get_observation()
         _update_invalid_turn_tracking(
@@ -248,8 +279,8 @@ def run_self_play(args: argparse.Namespace) -> None:
                 for player_id in range(args.num_players)
             }
 
-            _, game_records = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia)
-            all_records.extend(game_records)
+        _, game_records = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
+        all_records.extend(game_records)
 
             with output_path.open("w", encoding="utf-8") as f:
                 for rec in all_records:

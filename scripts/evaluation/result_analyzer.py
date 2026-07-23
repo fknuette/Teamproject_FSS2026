@@ -157,7 +157,7 @@ def _display_model_name(model: str) -> str:
 
 
 def _role_sort_key(role: str) -> tuple[int, str]:
-    preferred_order = {"werewolf": 0, "villager": 1}
+    preferred_order = {"Mafia": 0, "Village": 1}
     return preferred_order.get(role, 100), role
 
 
