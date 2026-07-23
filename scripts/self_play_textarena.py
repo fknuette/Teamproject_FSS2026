@@ -6,7 +6,7 @@ import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Union
 import sys
 
 import torch
@@ -17,7 +17,6 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import textarena as ta
-import re
 from textarena.core import Agent
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
