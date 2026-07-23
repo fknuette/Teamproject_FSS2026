@@ -137,9 +137,9 @@ def _simulate_game(
         for pid, (checkpoint, team, role_name) in actual_player_info.items():
             env_role = type(env.roles[pid]).__name__
             agent_model = agents[pid].model_name
-            role_ok = "✓" if env_role == role_name else f"✗ MISMATCH (env={env_role})"
-            model_ok = "✓" if agent_model == checkpoint else f"✗ MISMATCH (agent={agent_model})"
-            print(f"▶️ Player {pid:2} | Role: {role_name:<10} {role_ok} | Model: {checkpoint} {model_ok}")
+            #role_ok = "✓" if env_role == role_name else f"✗ MISMATCH (env={env_role})"
+            #model_ok = "✓" if agent_model == checkpoint else f"✗ MISMATCH (agent={agent_model})"
+            print(f"▶️ Player {pid:2} | Role: {role_name:<10} (Info), {env_role} (Env) | Model: {checkpoint} (Info), {agent_model} (Agents)")#{model_ok}")
 
     else:
         agents = agents_or_config  # Use the provided agents directly
