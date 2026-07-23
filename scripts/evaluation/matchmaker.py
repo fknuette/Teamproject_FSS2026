@@ -13,8 +13,8 @@ class AgentConfig:
     
     checkpoint_id: str  # Model checkpoint ID
     player_idx: int  # Player position (0-5)
-    team: str  # "team_a" or "team_b"
-    role: str  # "werewolf" or "villager"
+    team: str  # "Mafia" or "Village"
+    role: str  # "Mafia" or "Villager"
 
 
 @dataclass(frozen=True)
@@ -43,7 +43,7 @@ class SimplePairMatchmaker(Matchmaker):
     # Game configuration - modify here to change evaluation settings
     NUM_WEREWOLVES = 2
     NUM_VILLAGERS = 4
-    NUM_GAMES_EVAL_WEREWOLF = 2
+    NUM_GAMES_EVAL_MAFIA = 2
     NUM_GAMES_EVAL_VILLAGER = 2
     
     def __init__(self, baseline_checkpoint: str = "Qwen/Qwen2.5-7B-Instruct"):
@@ -58,29 +58,29 @@ class SimplePairMatchmaker(Matchmaker):
         matchups_dict = {}
         
         # Matchup 1: eval as Werewolves, baseline as Villagers
-        if self.NUM_GAMES_EVAL_WEREWOLF > 0:
-            agents_werewolf = []
+        if self.NUM_GAMES_EVAL_MAFIA > 0:
+            agents_mafia = []
             for i in range(self.NUM_WEREWOLVES):
-                agents_werewolf.append(
+                agents_mafia.append(
                     AgentConfig(
                         checkpoint_id=eval_checkpoint,
                         player_idx=i,
-                        team="team_a",
-                        role="werewolf",
+                        team="Mafia",
+                        role="Mafia",
                     )
                 )
             for i in range(self.NUM_VILLAGERS):
-                agents_werewolf.append(
+                agents_mafia.append(
                     AgentConfig(
                         checkpoint_id=self.baseline_checkpoint,
                         player_idx=self.NUM_WEREWOLVES + i,
-                        team="team_b",
-                        role="villager",
+                        team="Village",
+                        role="Village",
                     )
                 )
             
-            matchup_werewolf = Matchup(agents=tuple(agents_werewolf))
-            matchups_dict[matchup_werewolf] = self.NUM_GAMES_EVAL_WEREWOLF
+            matchup_mafia = Matchup(agents=tuple(agents_mafia))
+            matchups_dict[matchup_mafia] = self.NUM_GAMES_EVAL_MAFIA
         
         # Matchup 2: eval as Villagers, baseline as Werewolves
         if self.NUM_GAMES_EVAL_VILLAGER > 0:
@@ -90,8 +90,8 @@ class SimplePairMatchmaker(Matchmaker):
                     AgentConfig(
                         checkpoint_id=self.baseline_checkpoint,
                         player_idx=i,
-                        team="team_a",
-                        role="werewolf",
+                        team="Mafia",
+                        role="Mafia",
                     )
                 )
             for i in range(self.NUM_VILLAGERS):
@@ -99,8 +99,8 @@ class SimplePairMatchmaker(Matchmaker):
                     AgentConfig(
                         checkpoint_id=eval_checkpoint,
                         player_idx=self.NUM_WEREWOLVES + i,
-                        team="team_b",
-                        role="villager",
+                        team="Village",
+                        role="Village",
                     )
                 )
             
