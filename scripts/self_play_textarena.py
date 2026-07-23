@@ -116,33 +116,31 @@ def _simulate_game(
     done = False
     turn_id = 0
 
+    actual_player_info: dict[int, tuple[str, str, str]] = {}  # player_id -> (checkpoint, team, role)
     if is_eval:
-        ta_assigned_roles = getattr(env, "roles", {})#env.roles#getattr(env.state, "roles", {})
+        ta_assigned_roles = getattr(env, "roles", {})
         print(f"Assigned roles: {ta_assigned_roles}")
         agents: dict[int, VLLMTextArenaAgent] = {}
-        # Aufteilen der konfigurierten Agenten-Instanzen nach Teams
-        config_team_a = [cfg[1] for cfg in agents_or_config.values() if cfg[2] == "Mafia"]
-        config_team_b = [cfg[1] for cfg in agents_or_config.values() if cfg[2] == "Village"]
+        config_team_a = [(cfg[0], cfg[1]) for cfg in agents_or_config.values() if cfg[2] == "Mafia"]
+        config_team_b = [(cfg[0], cfg[1]) for cfg in agents_or_config.values() if cfg[2] == "Village"]
 
         for ta_player_id, ta_role in ta_assigned_roles.items():
             role_name = type(ta_role).__name__
-            if role_name == "Mafia":
-                # Mafia-IDs bekommen Modelle aus Team A
-                agents[ta_player_id] = config_team_a.pop(0)
+            team = "Mafia" if role_name == "Mafia" else "Village"
+            if team == "Mafia":
+                checkpoint, agent_instance = config_team_a.pop(0)
             else:
-                # Dorf-IDs (Villager, Doctor, etc.) bekommen Modelle aus Team B
-                agents[ta_player_id] = config_team_b.pop(0)
-        print(f"Assigned roles: {ta_assigned_roles}")
-        print(f"Agents mapping: {agents}")
-        for pid, agent_instance in agents.items():
-            # Holt den Klassennamen des Rollen-Objekts (z.B. "Mafia", "Doctor")
-            actual_role = type(env.roles[pid]).__name__
-        
-            # Liest den Modellpfad aus dem Agenten
-            agent_identity = agent_instance.model_name
-        
-            print(f"▶️ Spieler-ID {pid:2} | Rolle: {actual_role:<10} | Zugewiesenes Modell: {agent_identity}")
-    
+                checkpoint, agent_instance = config_team_b.pop(0)
+            agents[ta_player_id] = agent_instance
+            actual_player_info[ta_player_id] = (checkpoint, team, role_name)
+
+        for pid, (checkpoint, team, role_name) in actual_player_info.items():
+            env_role = type(env.roles[pid]).__name__
+            agent_model = agents[pid].model_name
+            role_ok = "✓" if env_role == role_name else f"✗ MISMATCH (env={env_role})"
+            model_ok = "✓" if agent_model == checkpoint else f"✗ MISMATCH (agent={agent_model})"
+            print(f"▶️ Player {pid:2} | Role: {role_name:<10} {role_ok} | Model: {checkpoint} {model_ok}")
+
     else:
         agents = agents_or_config  # Use the provided agents directly
     
@@ -179,7 +177,7 @@ def _simulate_game(
         if record.turn_id in invalid_turn_ids:
             record.reward = -1.0
 
-    return reward_map, game_records
+    return reward_map, game_records, actual_player_info
 
 
 # ===== INVALID MOVE HANDLING START =====
@@ -278,7 +276,7 @@ def run_self_play(args: argparse.Namespace) -> None:
                 for player_id in range(args.num_players)
             }
 
-        _, game_records = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
+        _, game_records, _ = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
         all_records.extend(game_records)
 
             with output_path.open("w", encoding="utf-8") as f:

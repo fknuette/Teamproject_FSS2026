@@ -57,7 +57,7 @@ class SimplePairMatchmaker(Matchmaker):
         """Generate matchups: eval vs baseline with role separation."""
         matchups_dict = {}
         
-        # Matchup 1: eval as Werewolves, baseline as Villagers
+        # Matchup 1: eval as Mafia, baseline as Villagers
         if self.NUM_GAMES_EVAL_MAFIA > 0:
             agents_mafia = []
             for i in range(self.NUM_WEREWOLVES):
