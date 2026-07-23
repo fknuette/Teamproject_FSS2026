@@ -14,6 +14,8 @@ def extract_phase(observation:str) -> Literal["Discuss", "Voting", "Action"]:
     # Findout in we will vote or not
     matches = re.findall(r'\[GAME\](.*)(?=\n|$)', observation)
     valid_matches = [m.strip() for m in matches if "invalid move" not in m.lower()]
+    if not valid_matches:
+        raise ValueError(f"No valid [GAME] markers found in observation: {observation!r}")
     phase_text = valid_matches[-1]
     if "Voting phase" in phase_text:
         return "Voting"
