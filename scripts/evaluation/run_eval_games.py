@@ -77,34 +77,22 @@ def run_eval_games(
                 agent_config.role,
             )
         
-        # Determine team assignments
-        mafia_players = set(
-            idx for idx, (_, _, team, _) in agent_configs.items() if team == "Mafia"
-        )
-        villager_players = set(
-            idx for idx, (_, _, team, _) in agent_configs.items() if team == "Village"
-        )
-        
         num_players = max(agent_configs) + 1
 
         # Play num_games games for this matchup
         for game_in_matchup in range(num_games):
-            agents: dict[int, VLLMTextArenaAgent] = {
-                player_id: agent_configs[player_id][1]
-                for player_id in range(num_players)
-            }
+            reward_map, _, actual_player_info = _simulate_game(global_game_id, agent_configs, env_id, num_players=num_players, is_eval=True)
 
-            reward_map, _ = _simulate_game(global_game_id, agent_configs, env_id, num_players=num_players, is_eval=True)
-
-            # Determine winning team based on rewards
+            # Determine winning team from actual TextArena role assignments
+            mafia_players = {pid for pid, (_, team, _) in actual_player_info.items() if team == "Mafia"}
+            villager_players = {pid for pid, (_, team, _) in actual_player_info.items() if team == "Village"}
             mafia_reward = sum(reward_map.get(pid, 0.0) for pid in mafia_players)
             villager_reward = sum(reward_map.get(pid, 0.0) for pid in villager_players)
             winning_team = "Mafia" if mafia_reward > villager_reward else "Village"
-            
-            # Create player info for all players
+
+            # Create player info using actual TextArena player assignments
             players_info = []
-            for player_id in range(num_players):
-                checkpoint_id, _, team, role = agent_configs[player_id]
+            for player_id, (checkpoint_id, team, role) in actual_player_info.items():
                 players_info.append(
                     PlayerInfo(
                         player_id=player_id,
