@@ -57,6 +57,33 @@ def evaluate_simple_matchmaking_winrate(results_path: str | Path) -> str:
     return _render_winrate_report(total_games=len(results), stats=stats)
 
 
+def evaluate_trueskill_eval_winrate(
+    results_path: str | Path, eval_checkpoint: str
+) -> str:
+    """Return a winrate report for eval_checkpoint from TrueSkill game results.
+
+    Tracks stats per player occurrence so each game contributes exactly one
+    entry for the eval checkpoint regardless of team size.
+    """
+    results = _load_jsonl(Path(results_path))
+    stats: dict[str, dict[str, Any]] = {}
+
+    for result in results:
+        winning_team = result["winning_team"]
+        for player in result["players"]:
+            if player["checkpoint"] != eval_checkpoint:
+                continue
+            won = player["team"] == winning_team
+            model_stats = _get_model_stats(stats, eval_checkpoint)
+            _add_result(model_stats["overall"], won)
+            _add_result(model_stats["by_team"].setdefault(player["team"], _empty_counts()), won)
+            _add_result(model_stats["by_role"].setdefault(player["role"], _empty_counts()), won)
+
+    if not stats:
+        return f"No results found for eval checkpoint: {eval_checkpoint}"
+    return _render_winrate_report(total_games=len(results), stats=stats)
+
+
 def _load_jsonl(path: Path) -> list[dict[str, Any]]:
     results = []
     with path.open("r", encoding="utf-8") as file:
