@@ -35,7 +35,7 @@ def run_eval_games(
     output_path: Path,
     tensor_parallel_size: int = 1,
     gpu_memory_utilization: float = 0.6,
-) -> None:
+) -> list[GameResult]:
     """Run evaluation games with different agents per player.
     
     Args:
@@ -117,3 +117,4 @@ def run_eval_games(
             f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
     
     print(f"Wrote {len(all_results)} eval game results to {output_path}")
+    return all_results
