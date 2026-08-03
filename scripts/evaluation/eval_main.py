@@ -13,7 +13,7 @@ if str(ROOT) not in sys.path:
 from agent_factory import AgentFactory
 from checkpoint_registry import CheckpointRegistry, ROLES
 from matchmaker import SimplePairMatchmaker
-from random_matchmaker import RandomMatchmaker
+from matchmaker import RandomMatchmaker
 from result_analyzer import evaluate_simple_matchmaking_winrate, evaluate_trueskill_eval_winrate
 from run_eval_games import run_eval_games
 from trueskill_rater import update_ratings_from_results
