@@ -119,7 +119,7 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     matchmaker = SimplePairMatchmaker(
         baseline_checkpoint=args.baseline_checkpoint,
     )
-    matchups_dict = matchmaker.get_matchups(args.eval_checkpoint)
+    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint))# / "lora_adapter" / "final"))
 
     print(f"Evaluating checkpoint: {args.eval_checkpoint}")
     print(f"vs Baseline: {args.baseline_checkpoint}")
@@ -195,7 +195,7 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
         registry=registry,
         min_games_per_team_role=args.min_games_per_team_role,
     )
-    matchups_dict = matchmaker.get_matchups(args.eval_checkpoint)
+    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint))# / "lora_adapter" / "final"))
 
     total_games = sum(matchups_dict.values())
     print(f"TrueSkill mode — evaluating checkpoint: {args.eval_checkpoint}")
