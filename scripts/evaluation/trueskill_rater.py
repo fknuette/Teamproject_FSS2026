@@ -15,16 +15,22 @@ if TYPE_CHECKING:
 def update_ratings_from_results(
     results: Sequence[GameResult],
     registry: CheckpointRegistry,
+    fixed_baseline_checkpoint: str | None = None,
 ) -> None:
     """Update per-role TrueSkill ratings for all checkpoints in *results*.
 
     Processes each game result, updates in-memory ratings on *registry*, then
     atomically saves the registry to disk.
+
+    If *fixed_baseline_checkpoint* is provided, ratings for that checkpoint are
+    left unchanged so the baseline remains a stable reference point.
     """
     env = registry._build_trueskill_env()
     for game in results:
         updates = _compute_single_game(game, registry, env)
         for (ckpt_id, role), (new_mu, new_sigma, won) in updates.items():
+            if fixed_baseline_checkpoint is not None and ckpt_id == fixed_baseline_checkpoint:
+                continue
             registry.update_rating(ckpt_id, role, new_mu, new_sigma, won)
     registry.save()
 

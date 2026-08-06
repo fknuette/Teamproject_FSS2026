@@ -10,6 +10,7 @@ from typing import TYPE_CHECKING
 import textarena as ta
 
 if TYPE_CHECKING:
+    from checkpoint_registry import CheckpointRegistry
     from self_play_textarena import VLLMTextArenaAgent
 
 
@@ -35,6 +36,7 @@ def run_eval_games(
     output_path: Path,
     tensor_parallel_size: int = 1,
     gpu_memory_utilization: float = 0.6,
+    registry: CheckpointRegistry | None = None,
 ) -> list[GameResult]:
     """Run evaluation games with different agents per player.
     
@@ -69,7 +71,12 @@ def run_eval_games(
         agent_configs: dict[int, tuple[str, VLLMTextArenaAgent, str, str]] = {}
         
         for agent_config in matchup.agents:
-            agent = factory.create_agent(agent_config.checkpoint_id)
+            checkpoint_path = (
+                registry.get(agent_config.checkpoint_id).path
+                if registry is not None and agent_config.checkpoint_id in registry.all_ids()
+                else agent_config.checkpoint_id
+            )
+            agent = factory.create_agent(checkpoint_path)
             agent_configs[agent_config.player_idx] = (
                 agent_config.checkpoint_id,
                 agent,

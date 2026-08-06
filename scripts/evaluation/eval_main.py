@@ -99,7 +99,7 @@ def main() -> None:
                 f"No iter_*/lora_adapter/final checkpoints found in {args.checkpoint_dir!r}. "
                 "Pass --eval-checkpoint explicitly."
             )
-        args.eval_checkpoint = discovered[-1][1]
+        args.eval_checkpoint = discovered[-1][0]
         print(f"Auto-selected eval checkpoint: {discovered[-1][0]} ({args.eval_checkpoint})")
 
     # Resolve output directory based on mode if not explicitly provided
@@ -119,7 +119,7 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     matchmaker = SimplePairMatchmaker(
         baseline_checkpoint=args.baseline_checkpoint,
     )
-    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint))# / "lora_adapter" / "final"))
+    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
 
     print(f"Evaluating checkpoint: {args.eval_checkpoint}")
     print(f"vs Baseline: {args.baseline_checkpoint}")
@@ -180,23 +180,23 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
     if newly_discovered:
         registry.save()
 
-    if args.register_checkpoint:
-        registry.register(args.register_checkpoint, args.register_checkpoint)
-        registry.save()
-        print(f"Registered checkpoint: {args.register_checkpoint}")
+    
+    #if args.register_checkpoint:
+    #    registry.register(args.register_checkpoint, args.register_checkpoint)
+    #    registry.save()
+    #    print(f"Registered checkpoint: {args.register_checkpoint}")
 
     # Auto-register eval checkpoint if not yet present
-    if args.eval_checkpoint not in registry.all_ids():
-        registry.register(args.eval_checkpoint, args.eval_checkpoint)
-        registry.save()
-        print(f"Auto-registered eval checkpoint: {args.eval_checkpoint}")
+    #if args.eval_checkpoint not in registry.all_ids():
+    #    registry.register(args.eval_checkpoint, args.eval_checkpoint)
+    #    registry.save()
+    #    print(f"Auto-registered eval checkpoint: {args.eval_checkpoint}")
 
     matchmaker = RandomMatchmaker(
         registry=registry,
         min_games_per_team_role=args.min_games_per_team_role,
     )
-    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint))# / "lora_adapter" / "final"))
-
+    matchups_dict = matchmaker.get_matchups(args.eval_checkpoint)#str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
     total_games = sum(matchups_dict.values())
     print(f"TrueSkill mode — evaluating checkpoint: {args.eval_checkpoint}")
     print(f"Checkpoint dir: {args.checkpoint_dir}  ({len(discovered)} discovered)")
@@ -211,12 +211,13 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
         output_path=output_path,
         tensor_parallel_size=args.tensor_parallel_size,
         gpu_memory_utilization=args.gpu_memory_utilization,
+        registry=registry,
     )
 
     print(f"Results saved to {output_path}")
     print()
     print("Updating TrueSkill ratings...")
-    update_ratings_from_results(results, registry)
+    update_ratings_from_results(results, registry, fixed_baseline_checkpoint=args.baseline_checkpoint)
     print(f"Registry saved to {registry_path}")
     print()
     _print_trueskill_leaderboard(registry)
