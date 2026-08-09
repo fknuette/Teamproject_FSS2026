@@ -205,26 +205,13 @@ class RandomMatchmaker(Matchmaker):
         Excludes eval_checkpoint when other options exist.  Falls back to
         self-play (eval_checkpoint only) when the registry has a single entry.
         """
-        # Normalize the available checkpoints into full filesystem paths.
         if available_checkpoints is not None:
             pool: list[str] = []
             for c in available_checkpoints:
-                # If the caller passed a registry id, replace with the registered path
-                if c in self._registry.all_ids():
-                    pool.append(self._registry.get(c).path)
-                else:
-                    pool.append(c)
+                pool.append(c)
         else:
             # Use the registered checkpoint paths
-            pool = [self._registry.get(cid).path for cid in self._registry.all_ids()]
+            pool = list(self._registry.all_ids())
 
-        # Determine the eval checkpoint path for exclusion: if eval_checkpoint was
-        # provided as a registry id, convert to its registered path, otherwise
-        # assume the caller provided a path already.
-        if eval_checkpoint in self._registry.all_ids():
-            eval_path = self._registry.get(eval_checkpoint).path
-        else:
-            eval_path = eval_checkpoint
-
-        others = [c for c in pool if c != eval_path]
-        return others if others else [eval_path]
+        others = [c for c in pool if c != eval_checkpoint]
+        return others if others else [eval_checkpoint]
