@@ -42,7 +42,9 @@ def run_training(args: argparse.Namespace) -> None:
     old_policy_model = setup_old_policy_model(old_policy_model_path)
     
     # Setup frozen reference model for KL regularization
-    ref_model = setup_reference_model(args.model)
+    ref_model = setup_reference_model(
+        getattr(args, "reference_model", args.model)
+    )
     
     # Reuse tokenizer from policy model setup
     if tokenizer.pad_token is None:

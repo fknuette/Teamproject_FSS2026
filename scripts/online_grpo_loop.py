@@ -78,6 +78,7 @@ def main() -> None:
         train_args = argparse.Namespace(
             model=policy_model,
             old_policy_model=policy_model,  # Model that generated the rollout data
+            reference_model=args.base_model,
             data=str(current_dataset),
             output_dir=str(adapter_out),
             epochs=args.epochs,
