@@ -88,6 +88,11 @@ def main() -> None:
         default=None,
         help="Register this checkpoint path into the registry before running (trueskill mode)",
     )
+    parser.add_argument(
+        "--full",
+        action="store_true",
+        help="Run full evaluation for all discovered checkpoints (trueskill mode)",
+    )
 
     args = parser.parse_args()
 
@@ -167,40 +172,37 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
         registry.save()
         print(f"Registered baseline: {args.baseline_checkpoint}")
 
-    # Auto-discover and register all iter_* checkpoints from checkpoint_dir
-    discovered = _discover_checkpoints(Path(args.checkpoint_dir))
-    newly_discovered = [
-        (ckpt_id, ckpt_path)
-        for ckpt_id, ckpt_path in discovered
-        if ckpt_id not in registry.all_ids()
-    ]
-    for ckpt_id, ckpt_path in newly_discovered:
-        registry.register(ckpt_id, ckpt_path)
-        print(f"Discovered and registered checkpoint: {ckpt_id}")
-    if newly_discovered:
+    if args.full:
+        discovered = _discover_checkpoints(Path(args.checkpoint_dir))
+        newly_discovered = [
+            (ckpt_id, ckpt_path)
+            for ckpt_id, ckpt_path in discovered
+            if ckpt_id not in registry.all_ids()
+        ]
+        for ckpt_id, ckpt_path in newly_discovered:
+            ##registry.register(ckpt_id, ckpt_path)
+            #registry.save()
+            run_single_eval_game(ckpt_id, args, registry, output_dir)
+
+    else:
+        run_single_eval_game(args.eval_checkpoint, args, registry, output_dir)
+
+def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
+    if eval_checkpoint not in registry.all_ids():
+        checkpoint_path = str(Path(args.checkpoint_dir) / eval_checkpoint / "lora_adapter" / "final")
+        registry.register(eval_checkpoint, checkpoint_path)
+        print(f"Discovered and registered checkpoint: {eval_checkpoint}")
         registry.save()
-
-    
-    #if args.register_checkpoint:
-    #    registry.register(args.register_checkpoint, args.register_checkpoint)
-    #    registry.save()
-    #    print(f"Registered checkpoint: {args.register_checkpoint}")
-
-    # Auto-register eval checkpoint if not yet present
-    #if args.eval_checkpoint not in registry.all_ids():
-    #    registry.register(args.eval_checkpoint, args.eval_checkpoint)
-    #    registry.save()
-    #    print(f"Auto-registered eval checkpoint: {args.eval_checkpoint}")
 
     matchmaker = RandomMatchmaker(
         registry=registry,
         min_games_per_team_role=args.min_games_per_team_role,
     )
-    matchups_dict = matchmaker.get_matchups(args.eval_checkpoint)#str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
+    matchups_dict = matchmaker.get_matchups(eval_checkpoint)#str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
     total_games = sum(matchups_dict.values())
-    print(f"TrueSkill mode — evaluating checkpoint: {args.eval_checkpoint}")
-    print(f"Checkpoint dir: {args.checkpoint_dir}  ({len(discovered)} discovered)")
-    print(f"Registry: {registry_path}  ({len(registry.all_ids())} checkpoints)")
+    print(f"TrueSkill mode — evaluating checkpoint: {eval_checkpoint}")
+    #print(f"Checkpoint dir: {args.checkpoint_dir}  ({len(discovered)} discovered)")
+    #print(f"Registry: {registry_path}  ({len(registry.all_ids())} checkpoints)")
     print(f"Scheduled games: {total_games}")
     print()
 
@@ -218,11 +220,11 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
     print()
     print("Updating TrueSkill ratings...")
     update_ratings_from_results(results, registry, fixed_baseline_checkpoint=args.baseline_checkpoint)
-    print(f"Registry saved to {registry_path}")
+    #print(f"Registry saved to {registry_path}")
     print()
     _print_trueskill_leaderboard(registry)
     print()
-    print(evaluate_trueskill_eval_winrate(output_path, args.eval_checkpoint))
+    print(evaluate_trueskill_eval_winrate(output_path, eval_checkpoint))
     print()
     print("Evaluation complete!")
 
