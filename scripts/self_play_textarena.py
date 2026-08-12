@@ -171,6 +171,11 @@ def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
+    if not 6 <= args.num_players <= 15:
+        raise ValueError("num_players must be between 6 and 15")
+    if not 1 <= args.num_mafia <= args.num_players - 2:
+        raise ValueError("num_mafia must leave room for one Doctor and one Detective")
+
     # Accept either `--model-a` (from online loop) or `--model` (self-play CLI)
     model_name = getattr(args, "model", None)
     if model_name is None:
@@ -187,16 +192,15 @@ def run_self_play(args: argparse.Namespace) -> None:
         all_records: list[TurnRecord] = []
 
         for game_id in range(args.num_games):
-            env = ta.make(args.env_id)
-            env.reset(num_players=6)
+            env = ta.make(
+                args.env_id,
+                mafia_ratio=args.num_mafia / args.num_players,
+            )
+            env.reset(num_players=args.num_players)
 
             agents: dict[int, VLLMTextArenaAgent] = {
-                0: VLLMTextArenaAgent(llm, tokenizer),
-                1: VLLMTextArenaAgent(llm, tokenizer),
-                2: VLLMTextArenaAgent(llm, tokenizer),
-                3: VLLMTextArenaAgent(llm, tokenizer),
-                4: VLLMTextArenaAgent(llm, tokenizer),
-                5: VLLMTextArenaAgent(llm, tokenizer),
+                pid: VLLMTextArenaAgent(llm, tokenizer)
+                for pid in range(args.num_players)
             }
 
             game_records: list[TurnRecord] = []

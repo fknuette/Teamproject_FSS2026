@@ -58,6 +58,8 @@ def build_parser(context: str | None = None) -> argparse.ArgumentParser:
 def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     """Loop orchestration arguments."""
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
+    parser.add_argument("--num-players", type=int, default=8, help="Number of players per game (6-15)")
+    parser.add_argument("--num-mafia", type=int, default=2, help="Number of Mafia players per game")
     parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
     parser.add_argument("--loop-count", type=int, default=4)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
@@ -84,8 +86,10 @@ def _add_self_play_args(parser: argparse.ArgumentParser) -> None:
     """Self-play specific arguments."""
     parser.add_argument("--model", type=str, required=True, help="Model to use for self-play")
     parser.add_argument("--num-games", type=int, default=50, help="Number of games")
+    parser.add_argument("--num-players", type=int, default=8, help="Number of players per game (6-15)")
+    parser.add_argument("--num-mafia", type=int, default=2, help="Number of Mafia players per game")
     parser.add_argument("--output", type=str, default="data/selfplay_traces.jsonl", help="Output path")
-    parser.add_argument("--env-id", type=str, default="TicTacToe-v0", help="Environment ID")
+    parser.add_argument("--env-id", type=str, default="SecretMafia-v0", help="Environment ID")
 
 
 def _add_training_args(parser: argparse.ArgumentParser) -> None:
@@ -133,4 +137,3 @@ def _add_merge_args(parser: argparse.ArgumentParser) -> None:
                        help="Merge LoRA into base model after training")
     parser.add_argument("--merged-output-dir", type=str, default="",
                        help="Output directory for merged model")
-

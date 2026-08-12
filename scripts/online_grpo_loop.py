@@ -51,6 +51,8 @@ def main() -> None:
             env_id=args.env_id,
             model=policy_model,
             num_games=args.games_per_iter,
+            num_players=args.num_players,
+            num_mafia=args.num_mafia,
             output=str(iter_trace),
             temperature=args.temperature,
             top_p=args.top_p,
