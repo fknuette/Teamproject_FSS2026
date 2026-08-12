@@ -61,7 +61,7 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--num-players", type=int, default=8, help="Number of players per game (6-15)")
     parser.add_argument("--num-mafia", type=int, default=2, help="Number of Mafia players per game")
     parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
-    parser.add_argument("--loop-count", type=int, default=4)
+    parser.add_argument("--loop-count", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")

@@ -81,13 +81,14 @@ def run_training(args: argparse.Namespace) -> None:
     # Train
     trainer.train()
     
-    # Optionally merge LoRA into base model
+    
     if args.merge_for_vllm and args.merged_output_dir:
         merge_lora_adapter(
             base_model=args.model,
             adapter_dir=str(Path(args.output_dir) / "final"),
             merged_output_dir=args.merged_output_dir,
         )
+        print(f"[INFO] Merged model saved to {args.merged_output_dir}")
 
     # Cleanup GPU memory before returning to the outer loop
     del trainer

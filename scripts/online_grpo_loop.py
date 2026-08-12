@@ -92,28 +92,20 @@ def main() -> None:
             lora_r=args.lora_r,
             lora_alpha=args.lora_alpha,
             lora_dropout=args.lora_dropout,
-            merge_for_vllm=False,
-            merged_output_dir="",
+            merge_for_vllm=True,
+            merged_output_dir=str(merged_out),
         )
 
         print(f"[Iter {iter_idx}] GRPO training on {current_dataset}")
         run_training(train_args)
         gc.collect()
         torch.cuda.empty_cache()
-
-        if args.skip_merge:
-            print(f"[Iter {iter_idx}] Merge skipped; next rollout still uses {policy_model}")
-            continue
-
-        print(f"[Iter {iter_idx}] Merging LoRA adapter into full model for next vLLM rollout")
-        """
-        merge_lora_adapter(
-            base_model=policy_model,
-            adapter_dir=str(adapter_out),
-            merged_output_dir=str(merged_out),
-        )
+        prev_policy_model = policy_model
         policy_model = str(merged_out)
-        """
+        
+        if iter_idx > 1 and Path(prev_policy_model).is_dir():
+            shutil.rmtree(prev_policy_model, ignore_errors=True)
+        
     print("Online GRPO loop finished.")
 
 
