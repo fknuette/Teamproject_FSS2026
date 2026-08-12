@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 import re
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 import sys
+
+import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -168,78 +171,102 @@ def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
 
-    llm = LLM(model=args.model_a, tensor_parallel_size=args.tensor_parallel_size,)
-    tokenizer = AutoTokenizer.from_pretrained(args.model_a)
+    # Accept either `--model-a` (from online loop) or `--model` (self-play CLI)
+    model_name = getattr(args, "model", None)
+    if model_name is None:
+        raise ValueError("No model specified: provide --model or --model-a")
 
-    all_records: list[TurnRecord] = []
+    llm = LLM(
+        model=model_name,
+        tensor_parallel_size=args.tensor_parallel_size,
+        gpu_memory_utilization=getattr(args, "gpu_memory_utilization", 0.6),
+    )
+    tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-    for game_id in range(args.num_games):
-        env = ta.make(args.env_id)
-        env.reset(num_players=6)
+    try:
+        all_records: list[TurnRecord] = []
 
-        agents: dict[int, VLLMTextArenaAgent] = {
-            0: VLLMTextArenaAgent(llm, tokenizer),
-            1: VLLMTextArenaAgent(llm, tokenizer),
-            2: VLLMTextArenaAgent(llm, tokenizer),
-            3: VLLMTextArenaAgent(llm, tokenizer),
-            4: VLLMTextArenaAgent(llm, tokenizer),
-            5: VLLMTextArenaAgent(llm, tokenizer),
-        }
+        for game_id in range(args.num_games):
+            env = ta.make(args.env_id)
+            env.reset(num_players=6)
 
-        game_records: list[TurnRecord] = []
-        done = False
-        turn_id = 0
+            agents: dict[int, VLLMTextArenaAgent] = {
+                0: VLLMTextArenaAgent(llm, tokenizer),
+                1: VLLMTextArenaAgent(llm, tokenizer),
+                2: VLLMTextArenaAgent(llm, tokenizer),
+                3: VLLMTextArenaAgent(llm, tokenizer),
+                4: VLLMTextArenaAgent(llm, tokenizer),
+                5: VLLMTextArenaAgent(llm, tokenizer),
+            }
 
-        # ===== INVALID MOVE HANDLING START =====
-        invalid_turn_ids: set[int] = set()
-        seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents}
-        # ===== INVALID MOVE HANDLING END =====
-
-        while not done:
-            player_id, observation = env.get_observation()
+            game_records: list[TurnRecord] = []
+            done = False
+            turn_id = 0
 
             # ===== INVALID MOVE HANDLING START =====
-            _update_invalid_turn_tracking(
-                observation=observation,
-                player_id=player_id,
-                game_records=game_records,
-                invalid_turn_ids=invalid_turn_ids,
-                seen_eliminated_lines_by_player=seen_eliminated_lines_by_player,
-            )
+            invalid_turn_ids: set[int] = set()
+            seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents}
             # ===== INVALID MOVE HANDLING END =====
 
-            agent_out = agents[player_id](observation)
-            done, _ = env.step(action=agent_out["action"])
+            while not done:
+                player_id, observation = env.get_observation()
 
-            game_records.append(
-                TurnRecord(
-                    game_id=game_id,
-                    turn_id=turn_id,
-                    player_id=player_id,
+                # ===== INVALID MOVE HANDLING START =====
+                _update_invalid_turn_tracking(
                     observation=observation,
-                    response=agent_out["response"],
+                    player_id=player_id,
+                    game_records=game_records,
+                    invalid_turn_ids=invalid_turn_ids,
+                    seen_eliminated_lines_by_player=seen_eliminated_lines_by_player,
                 )
-            )
-            turn_id += 1
+                # ===== INVALID MOVE HANDLING END =====
 
-        rewards, _game_info = env.close()
-        reward_map = _normalize_rewards(rewards)
+                agent_out = agents[player_id](observation)
+                done, _ = env.step(action=agent_out["action"])
 
-        for record in game_records:
-            record.reward = reward_map.get(record.player_id, 0.0)
+                game_records.append(
+                    TurnRecord(
+                        game_id=game_id,
+                        turn_id=turn_id,
+                        player_id=player_id,
+                        observation=observation,
+                        response=agent_out["response"],
+                    )
+                )
+                turn_id += 1
 
-            # ===== INVALID MOVE HANDLING START =====
-            if record.turn_id in invalid_turn_ids:
-                record.reward = -1.0
-            # ===== INVALID MOVE HANDLING END =====
+            rewards, _game_info = env.close()
+            reward_map = _normalize_rewards(rewards)
 
-        all_records.extend(game_records)
+            for record in game_records:
+                record.reward = reward_map.get(record.player_id, 0.0)
 
-    with output_path.open("w", encoding="utf-8") as f:
-        for rec in all_records:
-            f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+                # ===== INVALID MOVE HANDLING START =====
+                if record.turn_id in invalid_turn_ids:
+                    record.reward = -1.0
+                # ===== INVALID MOVE HANDLING END =====
 
-    print(f"Wrote {len(all_records)} turn records to {output_path}")
+            all_records.extend(game_records)
+
+            with output_path.open("w", encoding="utf-8") as f:
+                for rec in all_records:
+                    f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+
+            print(f"Wrote {len(all_records)} turn records to {output_path}")
+    finally:
+        close_fn = getattr(llm, "close", None)
+        if callable(close_fn):
+            try:
+                close_fn()
+            except Exception:
+                pass
+
+        del llm
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass
 
 
 def main() -> None:

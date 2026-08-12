@@ -3,8 +3,10 @@ CLI and main entry point for GRPO training.
 """
 
 import argparse
+import gc
 from pathlib import Path
 
+import torch
 from transformers import AutoTokenizer
 
 from argument_parser import build_parser
@@ -86,6 +88,16 @@ def run_training(args: argparse.Namespace) -> None:
             adapter_dir=str(Path(args.output_dir) / "final"),
             merged_output_dir=args.merged_output_dir,
         )
+
+    # Cleanup GPU memory before returning to the outer loop
+    del trainer
+    del policy_model
+    del tokenizer
+    del old_policy_model
+    del ref_model
+    del train_dataset
+    gc.collect()
+    torch.cuda.empty_cache()
 
 
 def main() -> None:
