@@ -10,3 +10,5 @@ wheels/
 .venv
 # Training runs / logs
 scripts/runs/
+# Base model
+base/
