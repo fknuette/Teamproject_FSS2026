@@ -59,7 +59,7 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     """Loop orchestration arguments."""
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
     parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
-    parser.add_argument("--loop-count", type=int, default=4)
+    parser.add_argument("--loop-count", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
