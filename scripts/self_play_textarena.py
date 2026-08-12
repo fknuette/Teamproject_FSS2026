@@ -108,7 +108,7 @@ def _simulate_game(
     is_eval: bool = False,
 ) -> tuple[dict[int, float], list[TurnRecord]]:
     """Run one game loop and return rewards plus turn records."""
-    env = ta.make(env_id, mafia_ratio=args.num_mafia / args.num_players)
+    env = ta.make(env_id, mafia_ratio=num_mafia / num_players)
     env.reset(num_players=num_players)
     game_records: list[TurnRecord] = []
     invalid_turn_ids: set[int] = set()
@@ -276,14 +276,14 @@ def run_self_play(args: argparse.Namespace) -> None:
                 for player_id in range(args.num_players)
             }
 
-        _, game_records, _ = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
-        all_records.extend(game_records)
+            _, game_records, _ = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
+            all_records.extend(game_records)
 
-            with output_path.open("w", encoding="utf-8") as f:
-                for rec in all_records:
-                    f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+        with output_path.open("w", encoding="utf-8") as f:
+            for rec in all_records:
+                f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
 
-            print(f"Wrote {len(all_records)} turn records to {output_path}")
+        print(f"Wrote {len(all_records)} turn records to {output_path}")
     finally:
         close_fn = getattr(llm, "close", None)
         if callable(close_fn):

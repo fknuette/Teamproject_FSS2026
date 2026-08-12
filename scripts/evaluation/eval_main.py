@@ -79,7 +79,7 @@ def main() -> None:
     parser.add_argument(
         "--min-games-per-team-role",
         type=int,
-        default=10,
+        default=3,
         help="Minimum games where eval plays as Mafia and as Village (trueskill mode)",
     )
     parser.add_argument(
@@ -90,8 +90,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--full",
-        action="store_true",
-        help="Run full evaluation for all discovered checkpoints (trueskill mode)",
+        action=argparse.BooleanOptionalAction,
+        default=False,
     )
 
     args = parser.parse_args()
