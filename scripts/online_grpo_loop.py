@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import argparse
+import gc
 from pathlib import Path
 import shutil
 import sys
+
+import torch
 
 ROOT = Path(__file__).resolve().parents[1]
 SRC = ROOT / "src"
@@ -37,7 +40,6 @@ def main() -> None:
     datasets_dir.mkdir(parents=True, exist_ok=True)
     ckpt_dir.mkdir(parents=True, exist_ok=True)
 
-    opponent_model = args.opponent_model or args.base_model
     policy_model = args.base_model
 
     all_trace_files: list[Path] = []
@@ -47,18 +49,20 @@ def main() -> None:
 
         rollout_args = argparse.Namespace(
             env_id=args.env_id,
-            model_a=policy_model,
-            model_b=opponent_model,
+            model=policy_model,
             num_games=args.games_per_iter,
             output=str(iter_trace),
             temperature=args.temperature,
             top_p=args.top_p,
             max_new_tokens=args.max_new_tokens,
             tensor_parallel_size=args.tensor_parallel_size,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
 
-        print(f"[Iter {iter_idx}] Rollout with policy={policy_model} vs opponent={opponent_model}")
+        print(f"[Iter {iter_idx}] Rollout with model={policy_model}")
         run_self_play(rollout_args)
+        gc.collect()
+        torch.cuda.empty_cache()
         all_trace_files.append(iter_trace)
         merged_dataset = datasets_dir / f"train_until_iter_{iter_idx}.jsonl"
         concat_jsonl(all_trace_files, merged_dataset)
@@ -89,6 +93,8 @@ def main() -> None:
 
         print(f"[Iter {iter_idx}] GRPO training on {merged_dataset}")
         run_training(train_args)
+        gc.collect()
+        torch.cuda.empty_cache()
 
         if args.skip_merge:
             print(f"[Iter {iter_idx}] Merge skipped; next rollout still uses {policy_model}")

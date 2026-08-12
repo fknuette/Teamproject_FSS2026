@@ -58,9 +58,8 @@ def build_parser(context: str | None = None) -> argparse.ArgumentParser:
 def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     """Loop orchestration arguments."""
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
-    parser.add_argument("--base-model", type=str, default="Qwen/Qwen3-8B")
-    parser.add_argument("--opponent-model", type=str, default="")
-    parser.add_argument("--loop-count", type=int, default=1)
+    parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--loop-count", type=int, default=4)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
@@ -73,12 +72,17 @@ def _add_rollout_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--top-p", type=float, default=0.95)
     parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
+    parser.add_argument(
+        "--gpu-memory-utilization",
+        type=float,
+        default=0.3,
+        help="GPU memory utilization ratio for vLLM startup (0-1)",
+    )
 
 
 def _add_self_play_args(parser: argparse.ArgumentParser) -> None:
     """Self-play specific arguments."""
-    parser.add_argument("--model-a", type=str, required=True, help="First agent model")
-    parser.add_argument("--model-b", type=str, required=True, help="Second agent model")
+    parser.add_argument("--model", type=str, required=True, help="Model to use for self-play")
     parser.add_argument("--num-games", type=int, default=50, help="Number of games")
     parser.add_argument("--output", type=str, default="data/selfplay_traces.jsonl", help="Output path")
     parser.add_argument("--env-id", type=str, default="TicTacToe-v0", help="Environment ID")
