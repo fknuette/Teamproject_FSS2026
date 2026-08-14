@@ -77,6 +77,12 @@ def main() -> None:
         help="Path to checkpoint_registry.json (trueskill mode; defaults to <output-dir>/checkpoint_registry.json)",
     )
     parser.add_argument(
+        "--reset-registry",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Delete the existing registry before the run starts. Default is True; use --no-reset-registry to keep it.",
+    )
+    parser.add_argument(
         "--min-games-per-team-role",
         type=int,
         default=3,
@@ -157,13 +163,23 @@ def _discover_checkpoints(checkpoint_dir: Path) -> list[tuple[str, str]]:
     return results
 
 
+def prepare_registry_path(registry_path: Path, *, reset_registry: bool) -> Path:
+    """Return the registry path after optionally deleting an existing file."""
+    if reset_registry and registry_path.exists():
+        registry_path.unlink()
+        print(f"Reset registry at: {registry_path}")
+    return registry_path
+
+
 def _run_trueskill_mode(args, output_dir: Path) -> None:
     """Run evaluation in TrueSkill mode with a persistent checkpoint registry."""
+    import pdb; pdb.set_trace()
     registry_path = (
         Path(args.registry_path)
         if args.registry_path
         else output_dir / CheckpointRegistry.DEFAULT_REGISTRY_FILENAME
     )
+    registry_path = prepare_registry_path(registry_path, reset_registry=args.reset_registry)
     registry = CheckpointRegistry(registry_path)
 
     # Always ensure the baseline (untrained) model is in the registry
