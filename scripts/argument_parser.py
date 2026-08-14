@@ -19,6 +19,8 @@ Usage:
 
 import argparse
 
+DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
+
 
 def build_parser(context: str | None = None) -> argparse.ArgumentParser:
     """
@@ -60,19 +62,15 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--env-id", type=str, default="SecretMafia-v0")
     parser.add_argument("--num-players", type=int, default=8, help="Number of players per game (6-15)")
     parser.add_argument("--num-mafia", type=int, default=2, help="Number of Mafia players per game")
-    parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    parser.add_argument("--base-model", type=str, default=DEFAULT_BASE_MODEL)
     parser.add_argument("--loop-count", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
     parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
-    parser.add_argument("--skip-merge", action="store_true")
-
-
+  
+    
 def _add_rollout_args(parser: argparse.ArgumentParser) -> None:
     """Rollout/inference arguments (vLLM)."""
-    parser.add_argument("--temperature", type=float, default=0.7)
-    parser.add_argument("--top-p", type=float, default=0.95)
-    parser.add_argument("--max-new-tokens", type=int, default=256)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument(
         "--gpu-memory-utilization",
@@ -117,7 +115,7 @@ def _add_lora_args(parser: argparse.ArgumentParser) -> None:
 
 def _add_model_data_args(parser: argparse.ArgumentParser) -> None:
     """Model and data arguments."""
-    parser.add_argument("--model", type=str, default="Qwen/Qwen2.5-7B-Instruct",
+    parser.add_argument("--model", type=str, default=DEFAULT_BASE_MODEL,
                        help="Base model name or path (e.g., Qwen/Qwen2.5-7B-Instruct)")
     parser.add_argument("--data", type=str, default="runs/online_grpo/datasets/train_until_iter_1.jsonl",
                        help="Path to training data JSONL")
@@ -129,6 +127,8 @@ def _add_old_policy_args(parser: argparse.ArgumentParser) -> None:
     """Old policy model argument for GRPO ratio computation."""
     parser.add_argument("--old-policy-model", type=str, default=None,
                        help="Checkpoint that generated the rollout data (for GRPO ratio computation)")
+    parser.add_argument("--reference-model", type=str, default=DEFAULT_BASE_MODEL,
+                       help="Frozen reference model for KL regularization")
 
 
 def _add_merge_args(parser: argparse.ArgumentParser) -> None:

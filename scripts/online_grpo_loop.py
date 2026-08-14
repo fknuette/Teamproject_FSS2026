@@ -54,9 +54,6 @@ def main() -> None:
             num_players=args.num_players,
             num_mafia=args.num_mafia,
             output=str(iter_trace),
-            temperature=args.temperature,
-            top_p=args.top_p,
-            max_new_tokens=args.max_new_tokens,
             tensor_parallel_size=args.tensor_parallel_size,
             gpu_memory_utilization=args.gpu_memory_utilization,
         )
