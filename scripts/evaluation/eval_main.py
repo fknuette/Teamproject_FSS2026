@@ -44,7 +44,7 @@ def main() -> None:
         "--checkpoint-dir",
         type=str,
         default=str(default_checkpoint_dir),
-        help=f"Directory to scan for iter_*/lora_adapter/final checkpoints (trueskill mode; default: {default_checkpoint_dir})",
+        help=f"Directory to scan for iter_* checkpoints (trueskill mode; default: {default_checkpoint_dir})",
     )
     parser.add_argument(
         "--output-dir",
@@ -107,7 +107,7 @@ def main() -> None:
         discovered = _discover_checkpoints(Path(args.checkpoint_dir))
         if not discovered:
             raise SystemExit(
-                f"No iter_*/lora_adapter/final checkpoints found in {args.checkpoint_dir!r}. "
+                f"No usable iter_* checkpoints found in {args.checkpoint_dir!r}. "
                 "Pass --eval-checkpoint explicitly."
             )
         args.eval_checkpoint = discovered[-1][0]
@@ -130,7 +130,10 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     matchmaker = SimplePairMatchmaker(
         baseline_checkpoint=args.baseline_checkpoint,
     )
-    matchups_dict = matchmaker.get_matchups(str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
+    checkpoint_path = _resolve_checkpoint_path(
+        Path(args.checkpoint_dir), args.eval_checkpoint
+    )
+    matchups_dict = matchmaker.get_matchups(str(checkpoint_path))
 
     print(f"Evaluating checkpoint: {args.eval_checkpoint}")
     print(f"vs Baseline: {args.baseline_checkpoint}")
@@ -153,13 +156,26 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     print("Evaluation complete!")
 
 
+def _resolve_checkpoint_path(checkpoint_dir: Path, checkpoint_id: str) -> Path:
+    """Prefer a merged model and otherwise return the existing LoRA checkpoint."""
+    iter_dir = checkpoint_dir / checkpoint_id
+    merged_model = iter_dir / "merged_model"
+    if merged_model.is_dir():
+        print(f"Using merged model: {merged_model}")
+        return merged_model
+
+    lora_checkpoint = iter_dir / "lora_adapter" / "final"
+    print(f"No merged model found; using LoRA checkpoint: {lora_checkpoint}")
+    return lora_checkpoint
+
+
 def _discover_checkpoints(checkpoint_dir: Path) -> list[tuple[str, str]]:
-    """Return (checkpoint_id, path) pairs for all iter_*/lora_adapter/final dirs found."""
+    """Return (checkpoint_id, preferred model path) pairs for usable iter_* dirs."""
     results = []
     for iter_dir in sorted(checkpoint_dir.glob("iter_*")):
-        final_path = iter_dir / "lora_adapter" / "final"
-        if final_path.is_dir():
-            results.append((iter_dir.name, str(final_path)))
+        model_path = _resolve_checkpoint_path(checkpoint_dir, iter_dir.name)
+        if model_path.is_dir():
+            results.append((iter_dir.name, str(model_path)))
     return results
 
 
@@ -173,7 +189,7 @@ def prepare_registry_path(registry_path: Path, *, reset_registry: bool) -> Path:
 
 def _run_trueskill_mode(args, output_dir: Path) -> None:
     """Run evaluation in TrueSkill mode with a persistent checkpoint registry."""
-    import pdb; pdb.set_trace()
+    # import pdb; pdb.set_trace()
     registry_path = (
         Path(args.registry_path)
         if args.registry_path
@@ -205,8 +221,10 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
 
 def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
     if eval_checkpoint not in registry.all_ids():
-        checkpoint_path = str(Path(args.checkpoint_dir) / eval_checkpoint / "lora_adapter" / "final")
-        registry.register(eval_checkpoint, checkpoint_path)
+        checkpoint_path = _resolve_checkpoint_path(
+            Path(args.checkpoint_dir), eval_checkpoint
+        )
+        registry.register(eval_checkpoint, str(checkpoint_path))
         print(f"Discovered and registered checkpoint: {eval_checkpoint}")
         registry.save()
 
