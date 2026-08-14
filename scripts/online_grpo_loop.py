@@ -51,6 +51,8 @@ def main() -> None:
             env_id=args.env_id,
             model=policy_model,
             num_games=args.games_per_iter,
+            num_players=args.num_players,
+            num_mafia=args.num_mafia,
             output=str(iter_trace),
             temperature=args.temperature,
             top_p=args.top_p,
@@ -67,13 +69,16 @@ def main() -> None:
         merged_dataset = datasets_dir / f"train_until_iter_{iter_idx}.jsonl"
         concat_jsonl(all_trace_files, merged_dataset)
 
+        current_dataset = datasets_dir / f"train_iter_{iter_idx}.jsonl"
+        concat_jsonl([iter_trace], current_dataset)
+
         adapter_out = ckpt_dir / f"iter_{iter_idx}" / "lora_adapter"
         merged_out = ckpt_dir / f"iter_{iter_idx}" / "merged_model"
 
         train_args = argparse.Namespace(
             model=policy_model,
             old_policy_model=policy_model,  # Model that generated the rollout data
-            data=str(merged_dataset),
+            data=str(current_dataset),
             output_dir=str(adapter_out),
             epochs=args.epochs,
             batch_size=args.batch_size,
@@ -91,7 +96,7 @@ def main() -> None:
             merged_output_dir=str(merged_out),
         )
 
-        print(f"[Iter {iter_idx}] GRPO training on {merged_dataset}")
+        print(f"[Iter {iter_idx}] GRPO training on {current_dataset}")
         run_training(train_args)
         gc.collect()
         torch.cuda.empty_cache()
