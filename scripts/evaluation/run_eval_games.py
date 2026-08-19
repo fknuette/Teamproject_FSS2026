@@ -55,6 +55,12 @@ def run_eval_games(
     
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Prepare a separate file for per-turn records from evaluation games
+    eval_turns_path = output_path.with_name(output_path.stem + "_turns.jsonl")
+    eval_turns_path.parent.mkdir(parents=True, exist_ok=True)
+    # Truncate any existing file so we start fresh
+    eval_turns_path.open("w", encoding="utf-8").close()
     
     # Initialize agent factory
     factory = AgentFactory(
@@ -88,7 +94,14 @@ def run_eval_games(
 
         # Play num_games games for this matchup
         for game_in_matchup in range(num_games):
-            reward_map, _, actual_player_info = _simulate_game(global_game_id, agent_configs, env_id, num_players=num_players, is_eval=True)
+            reward_map, _, actual_player_info = _simulate_game(
+                global_game_id,
+                agent_configs,
+                env_id,
+                num_players=num_players,
+                is_eval=True,
+                output_path=eval_turns_path,
+            )
 
             # Determine winning team from actual TextArena role assignments
             mafia_players = {pid for pid, (_, team, _) in actual_player_info.items() if team == "Mafia"}
