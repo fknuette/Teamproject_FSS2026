@@ -6,7 +6,7 @@ import argparse
 from pathlib import Path
 import sys
 
-ROOT = Path(__file__).resolve().parents[1]  # scripts/
+ROOT = Path(__file__).resolve().parents[2]  # project root
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
@@ -23,10 +23,10 @@ def main() -> None:
     """Main entry point for evaluation."""
     parser = argparse.ArgumentParser(description="Run evaluation games")
 
-    # Determine default paths
-    root_dir = Path(__file__).resolve().parents[2]  # scripts/ parent
-    default_checkpoint_dir = root_dir / "scripts" / "runs" / "online_grpo" / "checkpoints"
-    default_output_dir = root_dir / "scripts" / "runs" / "online_grpo" / "evals"
+    # Determine default paths relative to the Teamproject_FSS2026 project root
+    root_dir = Path(__file__).resolve().parents[2]
+    default_checkpoint_dir = root_dir / "runs" / "online_grpo" / "checkpoints"
+    default_output_dir = root_dir / "runs" / "online_grpo" / "evals"
 
     parser.add_argument(
         "--eval-checkpoint",
@@ -172,11 +172,20 @@ def _resolve_checkpoint_path(checkpoint_dir: Path, checkpoint_id: str) -> Path:
 def _discover_checkpoints(checkpoint_dir: Path) -> list[tuple[str, str]]:
     """Return (checkpoint_id, preferred model path) pairs for usable iter_* dirs."""
     results = []
-    for iter_dir in sorted(checkpoint_dir.glob("iter_*")):
+    for iter_dir in sorted(checkpoint_dir.glob("iter_*"), key=lambda p: _iter_sort_key(p.name)):
         model_path = _resolve_checkpoint_path(checkpoint_dir, iter_dir.name)
         if model_path.is_dir():
             results.append((iter_dir.name, str(model_path)))
     return results
+
+
+def _iter_sort_key(iter_name: str) -> tuple[int, str]:
+    """Natural numeric ordering for names like iter_1, iter_10."""
+    prefix, _, suffix = iter_name.partition("_")
+    try:
+        return (0, int(suffix))
+    except ValueError:
+        return (1, iter_name)
 
 
 def prepare_registry_path(registry_path: Path, *, reset_registry: bool) -> Path:
@@ -189,7 +198,6 @@ def prepare_registry_path(registry_path: Path, *, reset_registry: bool) -> Path:
 
 def _run_trueskill_mode(args, output_dir: Path) -> None:
     """Run evaluation in TrueSkill mode with a persistent checkpoint registry."""
-    # import pdb; pdb.set_trace()
     registry_path = (
         Path(args.registry_path)
         if args.registry_path

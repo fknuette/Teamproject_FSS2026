@@ -18,6 +18,9 @@ Usage:
 """
 
 import argparse
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 DEFAULT_BASE_MODEL = "Qwen/Qwen2.5-7B-Instruct"
 
@@ -66,7 +69,7 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--loop-count", type=int, default=3)
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
-    parser.add_argument("--work-dir", type=str, default="runs/online_grpo")
+    parser.add_argument("--work-dir", type=str, default=str(PROJECT_ROOT / "runs" / "online_grpo"))
   
     
 def _add_rollout_args(parser: argparse.ArgumentParser) -> None:
@@ -117,9 +120,11 @@ def _add_model_data_args(parser: argparse.ArgumentParser) -> None:
     """Model and data arguments."""
     parser.add_argument("--model", type=str, default=DEFAULT_BASE_MODEL,
                        help="Base model name or path (e.g., Qwen/Qwen2.5-7B-Instruct)")
-    parser.add_argument("--data", type=str, default="runs/online_grpo/datasets/train_until_iter_1.jsonl",
+    parser.add_argument("--data", type=str,
+                       default=str(PROJECT_ROOT / "runs" / "online_grpo" / "datasets" / "train_until_iter_1.jsonl"),
                        help="Path to training data JSONL")
-    parser.add_argument("--output-dir", type=str, default="runs/online_grpo/checkpoints/test",
+    parser.add_argument("--output-dir", type=str,
+                       default=str(PROJECT_ROOT / "runs" / "online_grpo" / "checkpoints" / "test"),
                        help="Output directory for LoRA adapter")
 
 
