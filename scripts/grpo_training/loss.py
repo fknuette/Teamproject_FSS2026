@@ -93,13 +93,14 @@ def grpo_loss(
     kl_coef: float = 0.1,
 ) -> tuple[torch.Tensor, dict]:
     """
-    Compute GRPO loss.
-    
-    Loss = -E[advantage * min(ratio, clip(ratio))] + kl_coef * KL(policy || ref)
-    
-    ratio = policy_log_probs / old_policy_log_probs
-    KL = KL(policy || ref)
-    
+    Compute GRPO loss (token-level PPO-clip objective + KL penalty).
+
+    Loss = -E[ min(ratio * A, clip(ratio) * A) ] + kl_coef * KL(policy || ref)
+
+    Ratio und Clipping werden pro Token gebildet und über die Antwort-Tokens
+    gemittelt. Das hält jede einzelne Token-Ratio nahe 1, sodass das
+    Clip-Fenster [1-eps, 1+eps] wirksam bleibt.
+
     Args:
         policy_model: Trainable policy model (with LoRA)
         old_policy_model: Frozen old policy model (generated rollout data)
@@ -107,60 +108,68 @@ def grpo_loss(
         input_ids: Input token IDs
         attention_mask: Attention mask
         labels: Labels with -100 for prompt
-        advantages: Group-relative advantages
+        advantages: Group-relative advantages [batch_size]
         clip_epsilon: PPO clipping parameter
         kl_coef: KL divergence coefficient
-    
+
     Returns:
         loss: Scalar loss tensor
         metrics: Dict with logging metrics
     """
-    
-    # Compute log probs from policy model
-    policy_log_probs = compute_sequence_log_probs(
+
+    # Per-token log probs of the response under each model.
+    # mask marks the response tokens (1) vs. prompt/padding (0).
+    policy_tok, mask = compute_log_probs_per_token(
         policy_model, input_ids, attention_mask, labels
     )
-    
-    # Compute log probs from old policy model (no grad)
+    # Old policy and reference are frozen -> no gradient needed.
     with torch.no_grad():
-        old_log_probs = compute_sequence_log_probs(
+        old_tok, _ = compute_log_probs_per_token(
             old_policy_model, input_ids, attention_mask, labels
         )
-    
-    # Compute log probs from reference model (no grad)
-    with torch.no_grad():
-        ref_log_probs = compute_sequence_log_probs(
+        ref_tok, _ = compute_log_probs_per_token(
             ref_model, input_ids, attention_mask, labels
         )
-    
-    # Compute probability ratio: exp(log_pi - log_pi_old)
-    # This is used for the GRPO advantage clipping
-    log_ratio = policy_log_probs - old_log_probs
+
+    # Per-token importance ratio: how much more/less likely the current policy
+    # emits each token compared to the policy that generated the rollout.
+    log_ratio = policy_tok - old_tok                 # [batch_size, seq_len-1]
     ratio = torch.exp(log_ratio)
-    
-    # Clipped ratio
-    clipped_ratio = torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon)
-    
-    # Policy loss (negative because we minimize)
-    policy_loss_unclipped = -advantages * ratio
-    policy_loss_clipped = -advantages * clipped_ratio
-    policy_loss = torch.max(policy_loss_unclipped, policy_loss_clipped).mean()
-    
-    # KL divergence penalty using reference model (separate from ratio)
+
+    # Every token in a response shares that response's advantage.
+    adv = advantages.unsqueeze(1)                    # [batch_size, 1]
+
+    # PPO clipped surrogate: take the pessimistic (max of the negated) objective
+    # so a token whose ratio ran far from 1 can't dominate the update.
+    policy_loss_unclipped = -adv * ratio
+    policy_loss_clipped = -adv * torch.clamp(ratio, 1.0 - clip_epsilon, 1.0 + clip_epsilon)
+    per_token_loss = torch.max(policy_loss_unclipped, policy_loss_clipped)
+
+    # Average only over real response tokens (ignore prompt/padding).
+    valid = mask.sum().clamp(min=1.0)
+    policy_loss = (per_token_loss * mask).sum() / valid
+
+    # KL penalty keeps the policy close to the frozen reference model.
+    # Sequence-level log prob = sum of the (masked) per-token log probs.
+    policy_log_probs = policy_tok.sum(dim=-1)        # [batch_size]
+    ref_log_probs = ref_tok.sum(dim=-1)              # [batch_size]
+
     log_ratio_ref = policy_log_probs - ref_log_probs
     kl_div = ((torch.exp(log_ratio_ref) - 1.0) - log_ratio_ref).mean()
-    
-    # Total loss
+
+    # Total objective: clipped policy loss regularized by the KL term.
     total_loss = policy_loss + kl_coef * kl_div
-    
-    # Metrics for logging
+
+    # Masked statistics for logging (ratio is per token, so ignore padding).
+    ratio_mean = (ratio * mask).sum() / valid
+    ratio_var = ((ratio - ratio_mean) ** 2 * mask).sum() / valid
     metrics = {
         "policy_loss": policy_loss.item(),
         "kl_div": kl_div.item(),
         "total_loss": total_loss.item(),
-        "ratio_mean": ratio.mean().item(),
-        "ratio_std": ratio.std().item(),
+        "ratio_mean": ratio_mean.item(),
+        "ratio_std": ratio_var.sqrt().item(),
         "advantage_mean": advantages.mean().item(),
     }
-    
+
     return total_loss, metrics
