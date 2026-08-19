@@ -106,7 +106,8 @@ def _simulate_game(
     num_players: int = 8,
     num_mafia: int = 2,
     is_eval: bool = False,
-) -> tuple[dict[int, float], list[TurnRecord]]:
+    output_path: Union[str, Path, None] = None,
+) -> tuple[dict[int, float], list[TurnRecord], dict[int, tuple[str, str, str]]]:
     """Run one game loop and return rewards plus turn records."""
     env = ta.make(env_id, mafia_ratio=num_mafia / num_players)
     env.reset(num_players=num_players)
@@ -176,6 +177,14 @@ def _simulate_game(
         record.reward = reward_map.get(record.player_id, 0.0)
         if record.turn_id in invalid_turn_ids:
             record.reward = -1.0
+
+    # Optionally persist turn-level records to disk (append per-game JSONL)
+    if output_path is not None:
+        outp = Path(output_path)
+        outp.parent.mkdir(parents=True, exist_ok=True)
+        with outp.open("a", encoding="utf-8") as f:
+            for rec in game_records:
+                f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
 
     return reward_map, game_records, actual_player_info
 
@@ -249,6 +258,8 @@ def _update_invalid_turn_tracking(
 def run_self_play(args: argparse.Namespace) -> None:
     output_path = Path(args.output)
     output_path.parent.mkdir(parents=True, exist_ok=True)
+    # Truncate/initialize the output file so subsequent appends start fresh
+    output_path.open("w", encoding="utf-8").close()
 
     if not 6 <= args.num_players <= 15:
         raise ValueError("num_players must be between 6 and 15")
@@ -268,22 +279,24 @@ def run_self_play(args: argparse.Namespace) -> None:
     tokenizer = AutoTokenizer.from_pretrained(model_name)
 
     try:
-        all_records: list[TurnRecord] = []
-
         for game_id in range(args.num_games):
             agents: dict[int, VLLMTextArenaAgent] = {
                 player_id: VLLMTextArenaAgent(llm, tokenizer)
                 for player_id in range(args.num_players)
             }
 
-            _, game_records, _ = _simulate_game(game_id, agents, args.env_id, num_players=args.num_players, num_mafia=args.num_mafia, is_eval=False)
-            all_records.extend(game_records)
+            # _simulate_game now appends per-game turn records to `output_path`
+            _, game_records, _ = _simulate_game(
+                game_id,
+                agents,
+                args.env_id,
+                num_players=args.num_players,
+                num_mafia=args.num_mafia,
+                is_eval=False,
+                output_path=output_path,
+            )
 
-        with output_path.open("w", encoding="utf-8") as f:
-            for rec in all_records:
-                f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
-
-        print(f"Wrote {len(all_records)} turn records to {output_path}")
+        print(f"Appended turn records for {args.num_games} games to {output_path}")
     finally:
         close_fn = getattr(llm, "close", None)
         if callable(close_fn):
