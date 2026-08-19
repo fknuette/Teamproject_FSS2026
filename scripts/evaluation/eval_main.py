@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=["simple", "trueskill"],
-        default="trueskill",
+        default="simple",
         help="Evaluation mode: 'simple' (fixed baseline) or 'trueskill' (persistent ratings)",
     )
     parser.add_argument(
