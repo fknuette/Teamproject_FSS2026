@@ -101,7 +101,10 @@ def _normalize_rewards(rewards: Any) -> dict[int, float]:
 
 def _simulate_game(
     game_id: int,
-    agents_or_config: Union[dict[int, VLLMTextArenaAgent], dict[int, tuple[str, VLLMTextArenaAgent, str, str]]],
+    agents_or_config: Union[
+        dict[int, VLLMTextArenaAgent],
+        dict[int, tuple[str, VLLMTextArenaAgent, str, str]]
+    ],
     env_id: str,
     num_players: int = 8,
     num_mafia: int = 2,
@@ -109,21 +112,39 @@ def _simulate_game(
     output_path: Union[str, Path, None] = None,
 ) -> tuple[dict[int, float], list[TurnRecord], dict[int, tuple[str, str, str]]]:
     """Run one game loop and return rewards plus turn records."""
-    env = ta.make(env_id, mafia_ratio=num_mafia / num_players)
+
+    env = ta.make(
+        env_id,
+        mafia_ratio=num_mafia / num_players,
+    )
     env.reset(num_players=num_players)
     game_records: list[TurnRecord] = []
     invalid_turn_ids: set[int] = set()
-    seen_eliminated_lines_by_player: dict[int, set[str]] = {pid: set() for pid in agents_or_config}
+    seen_eliminated_lines_by_player: dict[int, set[str]] = {
+        pid: set() for pid in agents_or_config
+    }
+
     done = False
     turn_id = 0
 
-    actual_player_info: dict[int, tuple[str, str, str]] = {}  # player_id -> (checkpoint, team, role)
+    actual_player_info: dict[int, tuple[str, str, str]] = {}
+
     if is_eval:
         ta_assigned_roles = getattr(env, "roles", {})
         print(f"Assigned roles: {ta_assigned_roles}")
         agents: dict[int, VLLMTextArenaAgent] = {}
-        config_team_a = [(cfg[0], cfg[1]) for cfg in agents_or_config.values() if cfg[2] == "Mafia"]
-        config_team_b = [(cfg[0], cfg[1]) for cfg in agents_or_config.values() if cfg[2] == "Village"]
+
+        config_team_a = [
+            (cfg[0], cfg[1])
+            for cfg in agents_or_config.values()
+            if cfg[2] == "Mafia"
+        ]
+
+        config_team_b = [
+            (cfg[0], cfg[1])
+            for cfg in agents_or_config.values()
+            if cfg[2] == "Village"
+        ]
 
         for ta_player_id, ta_role in ta_assigned_roles.items():
             role_name = type(ta_role).__name__
@@ -133,19 +154,29 @@ def _simulate_game(
             else:
                 checkpoint, agent_instance = config_team_b.pop(0)
             agents[ta_player_id] = agent_instance
-            actual_player_info[ta_player_id] = (checkpoint, team, role_name)
+            actual_player_info[ta_player_id] = (
+                checkpoint,
+                team,
+                role_name,
+            )
 
         for pid, (checkpoint, team, role_name) in actual_player_info.items():
             env_role = type(env.roles[pid]).__name__
             agent_model = agents[pid].model_name
-            #role_ok = "✓" if env_role == role_name else f"✗ MISMATCH (env={env_role})"
-            #model_ok = "✓" if agent_model == checkpoint else f"✗ MISMATCH (agent={agent_model})"
-            print(f"▶️ Player {pid:2} | Role: {role_name:<10} (Info), {env_role} (Env) | Model: {checkpoint} (Info), {agent_model} (Agents)")#{model_ok}")
+
+            print(
+                f"▶️ Player {pid:2} | "
+                f"Role: {role_name:<10} (Info), {env_role} (Env) | "
+                f"Model: {checkpoint} (Info), {agent_model} (Agents)"
+            )
 
     else:
-        agents = agents_or_config  # Use the provided agents directly
-    
-    
+        agents = agents_or_config
+
+    # ---------------------------------------------------------
+    # Main game loop
+    # ---------------------------------------------------------
+
     while not done:
         player_id, observation = env.get_observation()
         _update_invalid_turn_tracking(
@@ -157,7 +188,10 @@ def _simulate_game(
         )
 
         agent_out = agents[player_id](observation)
-        done, _ = env.step(action=agent_out["action"])
+
+        done, step_info = env.step(
+            action=agent_out["action"]
+        )
 
         game_records.append(
             TurnRecord(
@@ -170,21 +204,55 @@ def _simulate_game(
         )
         turn_id += 1
 
-    rewards, _game_info = env.close()
+    # ---------------------------------------------------------
+    # Game has ended
+    # ---------------------------------------------------------
+
+    rewards, game_info = env.close()
     reward_map = _normalize_rewards(rewards)
+
+    end_reason = game_info[0].get("reason")
+
+    if end_reason is None:
+        end_reason = "Unknown"
+
+    # ---------------------------------------------------------
+    # Assign rewards to individual turns
+    # ---------------------------------------------------------
 
     for record in game_records:
         record.reward = reward_map.get(record.player_id, 0.0)
         if record.turn_id in invalid_turn_ids:
             record.reward = -1.0
 
-    # Optionally persist turn-level records to disk (append per-game JSONL)
+    # ---------------------------------------------------------
+    # Persist turn-level records and final game record
+    # ---------------------------------------------------------
+
     if output_path is not None:
         outp = Path(output_path)
         outp.parent.mkdir(parents=True, exist_ok=True)
         with outp.open("a", encoding="utf-8") as f:
             for rec in game_records:
-                f.write(json.dumps(asdict(rec), ensure_ascii=False) + "\n")
+                f.write(
+                    json.dumps(
+                        asdict(rec),
+                        ensure_ascii=False,
+                    ) + "\n"
+                )
+            if is_eval:
+                # Final game record
+                end_record = {
+                    "game_id": game_id,
+                    "end_reason": end_reason,
+                }
+
+                f.write(
+                    json.dumps(
+                        end_record,
+                        ensure_ascii=False,
+                    ) + "\n"
+                )
 
     return reward_map, game_records, actual_player_info
 
