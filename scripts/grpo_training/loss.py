@@ -149,13 +149,11 @@ def grpo_loss(
     valid = mask.sum().clamp(min=1.0)
     policy_loss = (per_token_loss * mask).sum() / valid
 
-    # KL penalty keeps the policy close to the frozen reference model.
-    # Sequence-level log prob = sum of the (masked) per-token log probs.
-    policy_log_probs = policy_tok.sum(dim=-1)        # [batch_size]
-    ref_log_probs = ref_tok.sum(dim=-1)              # [batch_size]
-
-    log_ratio_ref = policy_log_probs - ref_log_probs
-    kl_div = ((torch.exp(log_ratio_ref) - 1.0) - log_ratio_ref).mean()
+    # --- KL penalty: per-token k3 estimator toward the frozen reference ---
+    # k3: exp(-L) + L - 1  mit  L = log pi_policy - log pi_ref  (immer >= 0, min bei L=0)
+    log_ratio_ref = policy_tok - ref_tok
+    kl_per_token = torch.exp(-log_ratio_ref) + log_ratio_ref - 1.0
+    kl_div = (kl_per_token * mask).sum() / valid
 
     # Total objective: clipped policy loss regularized by the KL term.
     total_loss = policy_loss + kl_coef * kl_div

@@ -122,3 +122,37 @@ def test_gradient_flows_only_to_policy():
     assert torch.isfinite(policy.logits.grad).all()
     assert old.logits.grad is None      # unter no_grad berechnet
     assert ref.logits.grad is None
+
+def test_kl_zero_when_policy_equals_ref():
+    """KL == 0, wenn Policy und Reference identisch sind."""
+    ids, am, labels = _make_batch()
+    logits = torch.randn(1, ids.shape[1], 10)
+    model = FixedLogitsModel(logits)
+    old = FixedLogitsModel(logits + 0.5)          # old darf abweichen, KL nutzt nur policy vs ref
+    adv = torch.tensor([1.0])
+    _, m = grpo_loss(model, old, model, ids, am, labels, adv)  # policy == ref == model
+    assert abs(m["kl_div"]) < 1e-5
+
+
+def test_kl_positive_grows_and_stays_finite():
+    """KL > 0 bei Abweichung, wächst mit der Divergenz, bleibt endlich (per-Token)."""
+    import math
+    ids, am, labels = _make_batch()
+    T = ids.shape[1]
+    base = torch.randn(1, T, 10)
+    ref = FixedLogitsModel(base)
+    old = FixedLogitsModel(base)
+
+    def policy(delta):
+        b = base.clone()
+        for pos in range(T - 1):
+            b[0, pos, ids[0, pos + 1]] += delta   # Policy zieht von der Reference weg
+        return FixedLogitsModel(b)
+
+    adv = torch.tensor([1.0])
+    _, m_small = grpo_loss(policy(2.0), old, ref, ids, am, labels, adv)
+    _, m_large = grpo_loss(policy(20.0), old, ref, ids, am, labels, adv)
+
+    assert m_small["kl_div"] > 0.0
+    assert m_large["kl_div"] > m_small["kl_div"]   # größere Divergenz -> größere KL
+    assert math.isfinite(m_large["kl_div"])        # kein exp-Overflow trotz starker Abweichung
