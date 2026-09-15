@@ -384,16 +384,21 @@ if __name__ == "__main__":
     mode = parser.add_mutually_exclusive_group(required=True)
     mode.add_argument("--all", action="store_true", help="Alle Iterationen verarbeiten")
     mode.add_argument("--iteration", type=int, metavar="N", help="Nur iter_N.jsonl verarbeiten")
+    mode.add_argument("--file", type=str, metavar="PFAD", help="Eine einzelne .jsonl-/.json-Datei verarbeiten")
     parser.add_argument(
         "--traces-dir",
         type=Path,
         default=Path(__file__).resolve().parents[1] / "scripts" / "runs" / "online_grpo" / "traces",
         help="Ordner mit den iter_*.jsonl-Dateien",
     )
-    parser.add_argument("-o", "--output", help="Zieldatei; standardmaessig im Trace-Ordner")
+    parser.add_argument("-o", "--output", help="Zieldatei; standardmaessig neben der Eingabe")
     args = parser.parse_args()
+
     try:
-        output = convert_traces(args.traces_dir, None if args.all else args.iteration, args.output)
+        if args.file:
+            output = convert_log(args.file, args.output)
+        else:
+            output = convert_traces(args.traces_dir, None if args.all else args.iteration, args.output)
     except FileNotFoundError as error:
         parser.error(str(error))
     print(f"Gespeichert: {output}")
