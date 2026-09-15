@@ -1,0 +1,164 @@
+"""
+Online GRPO loop over the fixed VOTING scenarios.
+ 
+Lives in scenarios/ next to completion_generator.py and assign_vote_rewards.py.
+The "rollout" is generating completions for every .txt in observations_vote/,
+then auto-assigning the self-vote rewards. Then GRPO-train, merge, repeat --
+the merged model becomes the generator for the next iteration (= online).
+ 
+    observations_vote/*.txt
+        -> completions_vote/*.jsonl  (completions + auto rewards)
+        -> concat -> train (run_training) -> merge
+        -> next iteration generates with the improved model
+"""
+ 
+from __future__ import annotations
+ 
+import argparse
+import gc
+import sys
+from pathlib import Path
+ 
+import torch
+from vllm import LLM
+from transformers import AutoTokenizer
+ 
+# scenarios/ is one level under the project root; src/ sits at the root.
+ROOT = Path(__file__).resolve().parents[1]
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    sys.path.insert(0, str(SRC))
+ 
+from grpo_training.cli import run_training
+from completion_generator import generate_completions
+from assign_vote_rewards import assign_vote_rewards
+ 
+# All paths are relative to this script's folder (scenarios/), so the loop can be
+# run from anywhere.
+HERE = Path(__file__).resolve().parent
+ 
+ 
+def concat_jsonl(files: list[Path], output_file: Path) -> None:
+    """Merge per-scenario JSONL files into one training file for this iteration."""
+    output_file.parent.mkdir(parents=True, exist_ok=True)
+    with output_file.open("w", encoding="utf-8") as out:
+        for f in files:
+            out.write(f.read_text(encoding="utf-8"))
+ 
+ 
+def main() -> None:
+    p = argparse.ArgumentParser(description="Online GRPO loop over fixed voting scenarios")
+    p.add_argument("--obs-dir", type=str, default=str(HERE / "observations_vote"),
+                   help="Folder with the fixed .txt vote observations.")
+    p.add_argument("--completions-dir", type=str, default=str(HERE / "completions_vote"),
+                   help="Where the per-scenario completion JSONLs are written.")
+    p.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct")
+    p.add_argument("--work-dir", type=str, default=str(HERE / "runs" / "vote_loop"))
+    p.add_argument("--loop-count", type=int, default=4)
+    p.add_argument("--num-completions", type=int, default=8)
+    p.add_argument("--temperature", type=float, default=1.0,
+                   help="High by default: short vote answers need variance for GRPO signal.")
+    p.add_argument("--max-tokens", type=int, default=100, help="Votes are short.")
+    p.add_argument("--gpu-memory-utilization", type=float, default=0.6)
+    # training hyperparams passed straight through to run_training
+    p.add_argument("--epochs", type=int, default=1)
+    p.add_argument("--batch-size", type=int, default=2)
+    p.add_argument("--gradient-accumulation-steps", type=int, default=4)
+    p.add_argument("--learning-rate", type=float, default=1e-5)
+    p.add_argument("--max-prompt-length", type=int, default=1024)
+    p.add_argument("--max-completion-length", type=int, default=256)
+    p.add_argument("--logging-steps", type=int, default=10)
+    p.add_argument("--save-steps", type=int, default=100)
+    p.add_argument("--bf16", action="store_true")
+    p.add_argument("--lora-r", type=int, default=16)
+    p.add_argument("--lora-alpha", type=int, default=32)
+    p.add_argument("--lora-dropout", type=float, default=0.05)
+    args = p.parse_args()
+ 
+    work_dir = Path(args.work_dir)
+    data_dir = work_dir / "data"
+    ckpt_dir = work_dir / "checkpoints"
+    data_dir.mkdir(parents=True, exist_ok=True)
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+ 
+    obs_dir = Path(args.obs_dir)
+    completions_dir = Path(args.completions_dir)
+    completions_dir.mkdir(parents=True, exist_ok=True)
+ 
+    scenarios = sorted(obs_dir.glob("*.txt"))
+    if not scenarios:
+        raise SystemExit(f"No .txt scenarios found in {obs_dir}")
+    print(f"Found {len(scenarios)} vote scenarios in {obs_dir}")
+ 
+    policy_model = args.base_model
+ 
+    for iter_idx in range(1, args.loop_count + 1):
+        print(f"\n{'='*70}\n[Iter {iter_idx}] generating with {policy_model}\n{'='*70}")
+ 
+        # --- 1. ROLLOUT: completions for every scenario, model loaded ONCE ---
+        llm = LLM(model=policy_model, gpu_memory_utilization=args.gpu_memory_utilization)
+        tokenizer = AutoTokenizer.from_pretrained(policy_model)
+ 
+        iter_files: list[Path] = []
+        for game_id, scenario in enumerate(scenarios):
+            out_file = completions_dir / f"iter_{iter_idx}_{scenario.stem}.jsonl"
+            generate_completions(
+                scenario=str(scenario),
+                model=policy_model,
+                player_id=0,                     # metadata only; reward reads obs
+                num_completions=args.num_completions,
+                game_id=game_id,                 # one group per scenario
+                temperature=args.temperature,
+                max_tokens=args.max_tokens,
+                output=str(out_file),
+                llm=llm,                         # reuse the loaded model
+                tokenizer=tokenizer,
+            )
+            assign_vote_rewards(str(out_file))   # fill rewards in place
+            iter_files.append(out_file)
+ 
+        # free the generator model before training loads its three models
+        del llm, tokenizer
+        gc.collect()
+        torch.cuda.empty_cache()
+ 
+        # --- 2. one training file for THIS iteration (not cumulative) ---
+        train_file = data_dir / f"train_iter_{iter_idx}.jsonl"
+        concat_jsonl(iter_files, train_file)
+ 
+        # --- 3. TRAIN (reuses your existing run_training) ---
+        adapter_out = ckpt_dir / f"iter_{iter_idx}" / "lora_adapter"
+        merged_out = ckpt_dir / f"iter_{iter_idx}" / "merged_model"
+        train_args = argparse.Namespace(
+            model=policy_model,
+            old_policy_model=policy_model,
+            data=str(train_file),
+            output_dir=str(adapter_out),
+            epochs=args.epochs,
+            batch_size=args.batch_size,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            learning_rate=args.learning_rate,
+            max_prompt_length=args.max_prompt_length,
+            max_completion_length=args.max_completion_length,
+            logging_steps=args.logging_steps,
+            save_steps=args.save_steps,
+            bf16=args.bf16,
+            lora_r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
+            merge_for_vllm=True,                 # merge inside run_training
+            merged_output_dir=str(merged_out),
+        )
+        print(f"[Iter {iter_idx}] training on {train_file}")
+        run_training(train_args)
+        gc.collect()
+        torch.cuda.empty_cache()
+ 
+        # --- 4. next iteration generates with the improved model (= online) ---
+        policy_model = str(merged_out)
+ 
+    print("\nVote online loop finished.")
+ 
+ 
+if __name__ == "__main__":
+    main()
