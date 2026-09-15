@@ -45,9 +45,9 @@ class SimplePairMatchmaker(Matchmaker):
     
     # Game configuration - modify here to change evaluation settings
     NUM_WEREWOLVES = 2
-    NUM_VILLAGERS = 4
-    NUM_GAMES_EVAL_MAFIA = 2
-    NUM_GAMES_EVAL_VILLAGER = 2
+    NUM_VILLAGERS = 6
+    NUM_GAMES_EVAL_MAFIA = 10
+    NUM_GAMES_EVAL_VILLAGER = 10
     
     def __init__(self, baseline_checkpoint: str = "Qwen/Qwen2.5-7B-Instruct"):
         self.baseline_checkpoint = baseline_checkpoint

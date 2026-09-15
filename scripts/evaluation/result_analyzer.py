@@ -10,7 +10,6 @@ from typing import Any
 
 DEFAULT_RESULTS_PATH = (
     Path(__file__).resolve().parents[2]
-    / "scripts"
     / "runs"
     / "online_grpo"
     / "evals"
@@ -177,9 +176,13 @@ def _format_counts(counts: dict[str, int]) -> str:
 
 
 def _display_model_name(model: str) -> str:
-    marker = "/scripts/runs/online_grpo/checkpoints/"
-    if marker in model:
-        return model.split(marker, maxsplit=1)[1]
+    markers = [
+        "/scripts/runs/online_grpo/checkpoints/",
+        "/runs/online_grpo/checkpoints/",
+    ]
+    for marker in markers:
+        if marker in model:
+            return model.split(marker, maxsplit=1)[1]
     return model
 
 
