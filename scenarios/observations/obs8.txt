@@ -1,0 +1,48 @@
+Current observations: 
+[GAME] Welcome to Secret Mafia! You are Player 2.
+Your role: Mafia
+Team: Mafia
+Description: A Mafia member. Eliminate villagers and gain majority.
+
+Players: Player 0, Player 1, Player 2, Player 3, Player 4, Player 5, Player 6, Player 7
+
+Your teammates are: Player 2, Player 3.
+
+During DAY phase: Speak freely and vote.
+During NIGHT phase: '[Player X]' to vote and eliminate a villager.
+Win by eliminating villagers until Mafia equal or outnumber them.
+
+[GAME] Night has fallen. Mafia, agree on a victim.
+Valid targets: [0], [1], [4], [5], [6], [7]
+[Player 3] [0]
+[Player 2] [0]
+[GAME] Player 0 was killed during the night.
+[GAME] Day breaks. Discuss for 3 rounds, then a vote will follow.
+[Player 5] We lost Player 0 and have nothing yet. Everyone share a read — no claims. Let's see who overplays.
+[Player 4] Agreed. Behavior's all we've got. Watching who pushes hardest and who says nothing.
+[Player 2] No random Day 1 lynch — that just helps Mafia. But total silence is a tell too. Everyone commit to a read.
+[Player 6] Fair. Player 0 died before speaking, so probably a random opener. I'd focus on who's evasive today, not overthink the kill.
+[Player 3] Mostly agree with 2. Early read: 7's been quiet, and 4 pre-empting "watch the pushers" is a bit convenient. Just noting.
+[Player 7] Nothing to react to yet, 3. Pinning 4 this early feels manufactured. My read: 2 and 3 both waved us off the kill and off each other.
+[Player 1] 7's right. 2 said "don't overanalyze," 3 handed us two targets. Thin, but it's the only cluster we have. Mild suspicion on 3.
+[Player 5] Lining it up: 3 accused with no basis, 2 lowered the temperature. Together it reads like a Mafia rhythm. Leaning 3.
+[Player 4] Same. 3, you said watch the pushers then pushed on me. Not subtle. Hardening on 3.
+[Player 2] Consensus is forming fast — that can be a railroad too. But 7 and 1's reads track the sequence. Tentatively 3, watching 2's reply.
+[Player 6] This is the railroad — piling on 3 off one line. Lynch him and he flips village, Mafia gets a free night. I'd rather vote 7; the quiet-then-loud swing worries me.
+[Player 3] One bad early read isn't evidence. Redirecting the table onto me is the real tell. I'll vote 7 too — the sudden aggression is off.
+[Player 7] And there it is — 2 and 3 both land on me the same round. That's a lifeline, not a coincidence. Fully on 3 now, 2 right behind.
+[Player 1] The tell is the pairing: 3 gets heat, 2 supplies cover and an alt-target, 3 adopts it instantly. Villagers don't sync that clean. Voting 3.
+[Player 5] Nothing since has changed my mind. 3 today, 2 tomorrow if the flip confirms.
+[Player 4] Locked on 3. 2, last chance — give us a read that isn't "protect 3 or blame 7."
+[Player 2] You're all tunneling. Fine — but when the numbers tighten, remember I warned you. Still 7 from me.
+[Player 6] Convinced. The coordinated swing to 7 is what did it for me. Voting 3.
+[Player 3] If I flip village, this table just lost the game. That's on you. I've got nothing left to add.
+[Player 7] I'll take the votes — I'm clean and you'll see it tomorrow. 3 now, 2 next.
+[Player 1] No new info, no reason to move. Village on 3.
+[GAME] Voting phase - submit one vote in format [X]. Valid: [1], [2], [3], [4], [5], [6], [7]
+[Player 1] [2]
+[Player 4] [3]
+[Player 6] [3]
+[Player 5] [3]
+[Player 7] [3]
+[Player 3] [7]
