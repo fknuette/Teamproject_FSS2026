@@ -1,0 +1,41 @@
+[GAME] Welcome to Secret Mafia! You are Player 2.
+Your role: Detective
+Team: Village
+Description: Investigate players to find Mafia members.
+
+Players: Player 0, Player 1, Player 2, Player 3, Player 4, Player 5, Player 6, Player 7
+
+During DAY phase: Speak freely and vote.
+During NIGHT phase: '[Player X]' to investigate.
+You'll learn immediately if the target is Mafia.
+Win by identifying and eliminating all Mafia members.
+
+[GAME] Night phase - choose one player to investigate: [0], [1], [3], [4], [5], [6], [7]
+[GAME] Player 5 IS NOT a Mafia member.
+[GAME] Player 0 was killed during the night.
+[GAME] Day breaks. Discuss for 3 rounds, then a vote will follow.
+[Player 2] Morning all. Player 0 is gone before he could even say a word. I say we feel things out first — no rushed accusations. Anyone got a gut read?
+[Player 5] Same here. Day 1 we've barely got data, only behavior. I'm watching less for loud accusations and more for who stays a bit too cleanly out of everything. Nobody specific yet.
+[Player 3] Honestly, the kill tells us little — 0 was random. I'd keep it open and keep an eye on several people. Right now I don't feel truly safe about anyone, but nottruly uneasy either.
+[Player 4] Also for taking it slow. One thing: if someone suddenly pushes hard on a single person today, that's more suspicious to me than careful weighing. Let's just gather reads first.
+[Player 1] Sounds reasonable. I've honestly got two loose feelings — 3 sounded a touch too quick with "0 was random," and 7 hasn't said anything yet. Both thin though, Idon't want to build on it.
+[Player 6] I'd only half-follow 1 there — "said nothing yet" isn't a real tell in round 1, 7 just hadn't had a turn. But the quick brush-off from 3 is interesting, I'll note that. Otherwise: keep it open.
+[Player 7] Just hadn't had a turn, 1.  My read: this round's been suspiciously harmonious, everyone saying "stay calm." That's fine, but at some point we need to actually commit. No firm suspicion yet.
+[Player 2] Okay, a bit more substance now. I notice 3 got mentioned twice in passing (by 1 and 6), but nobody actually follows up on it. I don't want to torch 3 — just flagging there's a loose thread there.
+[Player 5] True. At the same time I find the 1/6 dynamic interesting: 1 throws something at 3, 6 half-relativizes it right away but keeps it in mind anyway. Could be normal chat — or two people softly cushioning each other. Just a thought.
+[Player 3] Thanks for keeping it open. On "random": I only meant we can't read much from the kill, not that it's irrelevant. I've got a slight feeling about 7 myself now— that "commit already" push sounds like someone wants to create tempo.
+[Player 4] For me it's three loose ends right now: 3 (the quick brush-off), the 1/6 cushioning, and 7's push for tempo. All soft, nothing hard. I want to deliberately keep it broad and not nail anyone down early.
+[Player 1] Fair, 5 — and I'll take the suspicion on me/6 seriously rather than wave it off. We didn't coordinate, but I see how it can look. By all means look closer. My3 feeling has cooled off, by the way.
+[Player 6] Yeah, I actually think the 1/6 read is healthy — that's exactly how it should go, question us. I've no interest in covering anyone. If I had to pick, 7's tempo push would be my most-likely suspect, but "most likely" out of a bunch of thin things.
+[Player 7] So now I land on the list for 3 and 6 — just for saying we should eventually deliver? That's exactly the vagueness I'm warning about. I've no problem being infocus, but then please with a reason.
+[Player 2] Quick summary so we don't loop: suspicion is spread across 3, the 1/6 pair, and 7. Weakest for me is the one against 7 — demanding tempo isn't a crime. I leanslightly toward keeping an eye on the 1/6 pattern.
+[Player 5] I'll sign that. I deliberately have no hard candidate — but if I prioritize one thing, it's watching whether 1 and 6 bend in sync again tomorrow. Today I'd almost rather abstain than sacrifice someone on thin stuff.
+[Player 3] Similar for me. I feel okay because my suspicion dissolved the moment people asked back. Honestly the 1/6 thing stays the most interesting to me too — not as an accusation, just an observation for Day 2.
+[Player 4] I'm for a soft day: either abstain, or a minimal consensus that gives us info tomorrow. Three thin threads don't make a solid rope. I don't want to lose a villager on a coin flip.
+[Player 1] Honestly, vote against me or 6 today if you want clarity — I don't fear the flip. I'd just find it a shame if we confuse tempo with guilt. My suggestion: keepit loose, Day 2 will tighten up.
+[Player 6] I see it like 1 — and yeah, I know that looks "in sync" again. But we just think alike. If the majority wants to abstain today, I'll go with it. No urge to push anyone through.
+[Player 7] Okay, I can live with "keep it open" — as long as Day 2 we actually deliver and don't just trade gut feelings again. I'll note the 1/6 pattern too. Abstain ora very soft consensus is fine by me.
+[GAME] Voting phase - submit one vote in format [X]. Valid: [1], [2], [3], [4], [5], [6], [7]
+[Player 3] [6]
+[Player 1] [7]
+[Player 4] [6]

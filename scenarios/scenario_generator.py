@@ -2,27 +2,28 @@
 Interaktives Aufzeichnungs-Skript fuer Single-Step-Testszenarien.
 
 Du spielst als Mensch alle Sitze eines SecretMafia-Spiels und konstruierst so
-gezielt eine Ausgangssituation. Am Ende wird die letzte Beobachtung als .txt
-gespeichert -- exakt so, wie TextArena sie ausgibt und wie der Loop sie als
-Prompt bekommen wuerde.
+gezielt eine Ausgangssituation. Am Ende werden ALLE Beobachtungen als JSON-Liste
+gespeichert -- jede mit turn_id, player_id und dem Beobachtungstext, exakt so,
+wie TextArena sie ausgibt und wie der Loop sie als Prompt bekommen wuerde.
 
 Aufruf:
-    python record_scenario.py
-    python record_scenario.py --env-id SecretMafia-v0 --num-players 8 --output my_prompt.txt
+    python scenario_generator.py
+    python scenario_generator.py --env-id SecretMafia-v0 --num-players 8 --output my_scenario.json
 
-Beenden mitten im Spiel: Ctrl-C -- die bis dahin letzte Beobachtung wird
-trotzdem gespeichert.
+Beenden mitten im Spiel: Ctrl-C -- die bis dahin gesammelten Beobachtungen
+werden trotzdem gespeichert.
 """
 
 from __future__ import annotations
 
 import argparse
+import json
 from datetime import datetime
 from pathlib import Path
 
 import textarena as ta
 
-SEED = 45
+SEED = 48
 
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Mafia-Szenario interaktiv aufzeichnen")
@@ -31,14 +32,14 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--num-players", type=int, default=8,
                    help="Anzahl Spieler (Default: 8)")
     p.add_argument("--output", type=str, default="",
-                   help="Zielpfad fuer die .txt-Aufzeichnung. Leer -> automatischer Zeitstempel-Name.")
+                   help="Zielpfad fuer die .json-Aufzeichnung. Leer -> automatischer Zeitstempel-Name.")
     return p.parse_args()
 
 
 def main() -> None:
     args = parse_args()
 
-    # Zielordner: Unterordner "prompts" NEBEN diesem Skript (unabhaengig davon,
+    # Zielordner: Unterordner "observations" NEBEN diesem Skript (unabhaengig davon,
     # aus welchem Arbeitsverzeichnis aufgerufen wird).
     script_dir = Path(__file__).resolve().parent
     out_dir = script_dir / "observations"
@@ -51,7 +52,7 @@ def main() -> None:
         if not out_path.is_absolute():
             out_path = out_dir / out_path
     else:
-        out_path = out_dir / f"scenario_{datetime.now():%Y%m%d_%H%M%S}.txt"
+        out_path = out_dir / f"scenario_{datetime.now():%Y%m%d_%H%M%S}.json"
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
     # Alle Sitze bekommen einen menschlichen Agenten -> du steuerst alle Spieler
@@ -69,8 +70,8 @@ def main() -> None:
     env = ta.make(env_id=args.env_id)
     env.reset(num_players=len(agents), seed=SEED)
 
-    # Wir merken uns die jeweils letzte Beobachtung (spaeter: dein fixer Prompt).
-    last_observation: str | None = None
+    # Wir sammeln ALLE Beobachtungen, jede mit turn_id und player_id.
+    observations: list[dict] = []
 
     done = False
     turn_id = 0
@@ -85,8 +86,12 @@ def main() -> None:
             print(observation)
             print("-" * 70)
 
-            # Beobachtung merken, BEVOR der Zug passiert
-            last_observation = observation
+            # Beobachtung sammeln, BEVOR der Zug passiert
+            observations.append({
+                "turn_id": turn_id,
+                "player_id": player_id,
+                "observation": observation,
+            })
 
             action = agents[player_id](observation)
             done, step_info = env.step(action=action)
@@ -94,8 +99,8 @@ def main() -> None:
 
     except KeyboardInterrupt:
         # Bewusstes Abbrechen ist der Normalfall: du willst ja nur BIS zu einem
-        # bestimmten Punkt spielen. Die letzte Beobachtung bleibt erhalten.
-        print("\n\n[Abbruch] Ctrl-C erkannt -- speichere die letzte Beobachtung.")
+        # bestimmten Punkt spielen. Die gesammelten Beobachtungen bleiben erhalten.
+        print("\n\n[Abbruch] Ctrl-C erkannt -- speichere die gesammelten Beobachtungen.")
 
     else:
         # Spiel regulaer zu Ende gespielt -> Rewards nur anzeigen
@@ -105,14 +110,14 @@ def main() -> None:
         print(f"Game Info: {game_info}")
         print("=" * 70)
 
-    # Letzte Beobachtung als reinen Text wegschreiben
-    if last_observation is None:
+    # Alle Beobachtungen als JSON-Liste wegschreiben
+    if not observations:
         raise SystemExit("[Fehler] Keine einzige Beobachtung aufgezeichnet.")
 
     with out_path.open("w", encoding="utf-8") as f:
-        f.write(last_observation)
+        json.dump(observations, f, ensure_ascii=False, indent=2)
 
-    print(f"\n[Gespeichert] Letzte Beobachtung -> {out_path}")
+    print(f"\n[Gespeichert] {len(observations)} Beobachtungen -> {out_path}")
 
 
 if __name__ == "__main__":
