@@ -1,0 +1,47 @@
+
+[GAME] Welcome to Secret Mafia! You are Player 3.
+Your role: Mafia
+Team: Mafia
+Description: A Mafia member. Eliminate villagers and gain majority.
+
+Players: Player 0, Player 1, Player 2, Player 3, Player 4, Player 5, Player 6, Player 7
+
+Your teammates are: Player 3, Player 4.
+
+During DAY phase: Speak freely and vote.
+During NIGHT phase: '[Player X]' to vote and eliminate a villager.
+Win by eliminating villagers until Mafia equal or outnumber them.
+
+[GAME] Night has fallen. Mafia, agree on a victim.
+Valid targets: [0], [1], [2], [5], [6], [7]
+[Player 4] [1]
+[Player 3] [1]
+[GAME] Player 1 was killed during the night.
+[GAME] Day breaks. Discuss for 3 rounds, then a vote will follow.
+[Player 5] r
+[Player 4] r
+[Player 3] r
+[Player 7] r
+[Player 0] r
+[Player 6] r
+[Player 2] r
+[Player 5] r
+[Player 4] rr
+[Player 3] r
+[Player 7] r
+[Player 0] r
+[Player 6] r
+[Player 2] r
+[Player 5] r
+[Player 4] r
+[Player 3] r
+[Player 7] r
+[Player 0] r
+[Player 6] r
+[Player 2] r
+[GAME] Voting phase - submit one vote in format [X]. Valid: [0], [2], [3], [4], [5], [6], [7]
+[Player 7] [4]
+[Player 6] [4]
+[Player 4] [4]
+[Player 5] [4]
+[Player 2] [4]
