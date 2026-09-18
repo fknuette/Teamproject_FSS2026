@@ -41,6 +41,24 @@ class VLLMTextArenaAgent(Agent):
         self.llm = llm
         self.tokenizer = tokinizer
 
+        # Qwen chat templates terminate assistant messages with <|im_end|>.
+        # Some Qwen checkpoints expose <|endoftext|> as eos_token instead, so
+        # vLLM would otherwise continue generating beyond the assistant turn.
+        im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
+        has_im_end = (
+            isinstance(im_end_id, int)
+            and im_end_id >= 0
+            and self.tokenizer.convert_ids_to_tokens(im_end_id) == "<|im_end|>"
+        )
+        stop_token_ids = {
+            token_id
+            for token_id in (self.tokenizer.eos_token_id, im_end_id if has_im_end else None)
+            if isinstance(token_id, int) and token_id >= 0
+        }
+        if not stop_token_ids:
+            raise ValueError("Tokenizer does not provide an EOS or <|im_end|> token")
+        self.stop_token_ids = sorted(stop_token_ids)
+
     @property
     def model_name(self) -> str:
         """Extrahiert den geladenen Modellpfad/Namen aus vLLM."""
@@ -59,15 +77,15 @@ class VLLMTextArenaAgent(Agent):
                 temperature=0.7,
                 top_p=0.95,
                 max_tokens=200,
-                # stop=["###"] # Stoppt erst am nächsten Block
+                stop_token_ids=self.stop_token_ids,
             )
         else:
-            # Logik-Check: Nacht (Nur Nummer) vs. Tag (Reden/Rechnen)
+            # Actions and votes should be short and deterministic.
             current_params = SamplingParams(
                 temperature=0.7,
                 top_p=0.95,
-                max_tokens=100,
-                # stop=[".", "\n", "]", " "] # Stoppt sofort nach der Zahl/Klammer
+                max_tokens=16, # For Voting do max_tokens down
+                stop_token_ids=self.stop_token_ids,
             )
             # Hier evtl. temperature > 0 lassen für natürlichere Sprache
         
