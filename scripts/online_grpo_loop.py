@@ -188,6 +188,21 @@ def main() -> None:
         else:
             print("[Eval] Skipping external evaluation because evaluation is handled inside training.")
         
+    # After full run, optionally archive the runs directory into `runs/final`.
+    if getattr(args, "archive_runs", False):
+        try:
+            if work_dir.exists():
+                from datetime import datetime
+
+                final_dir = work_dir.parent / "final"
+                final_dir.mkdir(parents=True, exist_ok=True)
+                ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+                dest = final_dir / f"run_{ts}"
+                shutil.move(str(work_dir), str(dest))
+                print(f"[Archive] Moved completed runs to {dest}")
+        except Exception:
+            print(f"[Archive] Failed to archive runs directory: {work_dir}; continuing")
+
     print("Online GRPO loop finished.")
 
 

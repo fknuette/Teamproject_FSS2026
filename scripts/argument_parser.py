@@ -76,6 +76,11 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
         help="If set, evaluation is performed inside training (skip external eval subprocess).",
     )
     parser.add_argument(
+        "--archive-runs",
+        action="store_true",
+        help="If set, move existing runs directory to runs/final/run_<timestamp> instead of deleting when starting fresh.",
+    )
+    parser.add_argument(
         "--eval-frequency",
         type=int,
         default=1,
