@@ -366,6 +366,13 @@ def run_self_play(args: argparse.Namespace) -> None:
 
         print(f"Appended turn records for {args.num_games} games to {output_path}")
     finally:
+        shutdown_fn = getattr(llm, "shutdown", None)
+        if callable(shutdown_fn):
+            try:
+                shutdown_fn()
+            except Exception:
+                pass
+
         close_fn = getattr(llm, "close", None)
         if callable(close_fn):
             try:
