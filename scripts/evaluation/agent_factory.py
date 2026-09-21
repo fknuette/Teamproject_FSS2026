@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import gc
 import json
 from pathlib import Path
 from typing import Dict
@@ -154,6 +155,28 @@ class AgentFactory:
         return self._tokenizer_cache[checkpoint_path]
     
     def clear_cache(self) -> None:
-        """Clear cached LLMs and tokenizers."""
+        """Clear cached LLMs and tokenizers and release vLLM GPU memory."""
+        for llm in list(self._llm_cache.values()):
+            shutdown_fn = getattr(llm, "shutdown", None)
+            if callable(shutdown_fn):
+                try:
+                    shutdown_fn()
+                except Exception:
+                    pass
+
+            close_fn = getattr(llm, "close", None)
+            if callable(close_fn):
+                try:
+                    close_fn()
+                except Exception:
+                    pass
+
+            del llm
+
         self._llm_cache.clear()
         self._tokenizer_cache.clear()
+        gc.collect()
+        try:
+            torch.cuda.empty_cache()
+        except Exception:
+            pass

@@ -70,6 +70,17 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--iterations", type=int, default=None, help=argparse.SUPPRESS)
     parser.add_argument("--games-per-iter", type=int, default=3)
     parser.add_argument("--work-dir", type=str, default=str(PROJECT_ROOT / "runs" / "online_grpo"))
+    parser.add_argument(
+        "--eval-inside-training",
+        action="store_true",
+        help="If set, evaluation is performed inside training (skip external eval subprocess).",
+    )
+    parser.add_argument(
+        "--eval-frequency",
+        type=int,
+        default=1,
+        help="Evaluate every N training iterations when --eval-inside-training is set (N>=1)",
+    )
   
     
 def _add_rollout_args(parser: argparse.ArgumentParser) -> None:
