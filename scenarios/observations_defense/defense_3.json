@@ -1,0 +1,12 @@
+{
+  "player_id": 6,
+  "history": [
+    "[Player 0] Spieler 6 hat erst 3 verteidigt und später gegen 3 gestimmt.",
+    "[Player 5] Dieser Wechsel kurz vor der Abstimmung wirkt abgesprochen.",
+    "[Player 1] Spieler 6, begründe deine Entscheidung vor der nächsten Wahl."
+  ],
+  "observation": "[GAME] Welcome to Secret Mafia! You are Player 6.\nYour role is unknown to the other players. During discussions, your public statement is broadcast to everyone.\n\n[GAME] Daytime discussion. Public history:\n[Player 0] Spieler 6 hat erst 3 verteidigt und später gegen 3 gestimmt.\n[Player 5] Dieser Wechsel kurz vor der Abstimmung wirkt abgesprochen.\n[Player 1] Spieler 6, begründe deine Entscheidung vor der nächsten Wahl.\n[GAME] Discuss phase: The players suspect you. Respond to their accusations now.",
+  "verdacht_pre": 7.333333333333333,
+  "judge_mode": "mock",
+  "judge_model": ""
+}

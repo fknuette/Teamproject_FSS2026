@@ -1,0 +1,11 @@
+{
+  "player_id": 2,
+  "history": [
+    "[Player 5] Spieler 2 wich meiner Frage zur Nachtaktion aus.",
+    "[Player 1] Und er wechselte sofort das Thema. Spieler 2, erklär das bitte."
+  ],
+  "observation": "[GAME] Welcome to Secret Mafia! You are Player 2.\nYour role is unknown to the other players. During discussions, your public statement is broadcast to everyone.\n\n[GAME] Daytime discussion. Public history:\n[Player 5] Spieler 2 wich meiner Frage zur Nachtaktion aus.\n[Player 1] Und er wechselte sofort das Thema. Spieler 2, erklär das bitte.\n[GAME] Discuss phase: The players suspect you. Respond to their accusations now.",
+  "verdacht_pre": 7.333333333333333,
+  "judge_mode": "mock",
+  "judge_model": ""
+}

@@ -1,5 +1,5 @@
 """
-Generate N completions for ONE fixed scenario (raw observation) and save them in
+Generate N completions for ONE fixed scenario (raw .txt or JSON observation) and save them in
 the JSONL format that your GRPODataset can read directly.
 
 Can be used two ways:
@@ -9,7 +9,7 @@ Can be used two ways:
          records = generate_completions(scenario="prompts/s.txt", model="...", ...)
 
 Design decisions (intentional, see comments):
-- We save the RAW observation (from the .txt), NOT the already-built prompt.
+- We save the RAW observation (from the .txt or JSON 'observation'), NOT the already-built prompt.
   data.py rebuilds the prompt itself from the observation (extract_phase +
   build_agent_prompt + apply_chat_template). Saving the finished prompt would run
   it through the chain twice.
@@ -69,6 +69,15 @@ def generate_completions(
     # --- load raw observation ---
     scenario_path = Path(scenario)
     observation = scenario_path.read_text(encoding="utf-8")
+    scenario_metadata: dict = {}
+    if scenario_path.suffix.lower() == ".json":
+        scenario_data = json.loads(observation)
+        if not isinstance(scenario_data, dict) or not isinstance(scenario_data.get("observation"), str):
+            raise ValueError(f"JSON scenario needs a string 'observation': {scenario_path}")
+        observation = scenario_data["observation"]
+        for key in ("verdacht_pre", "judge_mode", "judge_model"):
+            if key in scenario_data:
+                scenario_metadata[key] = scenario_data[key]
     if not observation.strip():
         raise ValueError(f"Scenario file is empty: {scenario_path}")
 
@@ -131,6 +140,7 @@ def generate_completions(
             "reward": 0.0,                # placeholder -> evaluator fills this
             "player_id": player_id,
             "turn_id": i,                 # only to distinguish within the group
+            **scenario_metadata,
         })
 
     with out_path.open("w", encoding="utf-8") as f:
@@ -149,7 +159,7 @@ def generate_completions(
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="Generate N completions for one fixed scenario")
     p.add_argument("--scenario", type=str, required=True,
-                   help="Path to the .txt containing the RAW observation (fixed prompt).")
+                   help="Path to a raw .txt observation or a .json scenario with 'observation'.")
     p.add_argument("--model", type=str, required=True,
                    help="Model path or HF name used for sampling.")
     p.add_argument("--player-id", type=int, default=0,
