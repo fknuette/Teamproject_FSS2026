@@ -2,9 +2,10 @@
 Dynamic online GRPO loop for voting.
 
 Each iteration:
-  1. HARVEST: the current model plays a full self-play game; every voting-phase
-     observation is frozen as a scenario (into a wiped tmp folder -> fresh each
-     iteration).
+  1. HARVEST: the current model plays X full self-play games; from each game up to
+     Y voting-phase observations are randomly sampled and frozen as scenarios
+     (into a wiped tmp folder -> fresh each iteration). More games = more genuine
+     diversity; Y caps how much any single game contributes.
   2. COMPLETIONS: for each harvested scenario, sample N completions and
      auto-assign the self-vote rewards (reused pipeline).
   3. TRAIN: GRPO-train on this iteration's fresh data only (run_training).
@@ -16,13 +17,15 @@ fixed folder. Because every iteration harvests + trains fresh, old_policy == the
 model that generated the data stays correct.
 
 Usage:
-    python dynamic_vote_loop.py --base-model Qwen/Qwen2.5-7B-Instruct --loop-count 4 --bf16
+    python dynamic_vote_loop.py --base-model Qwen/Qwen2.5-7B-Instruct \
+        --loop-count 4 --games-per-iter 5 --situations-per-game 4 --bf16
 """
 
 from __future__ import annotations
 
 import argparse
 import gc
+import random
 import shutil
 import sys
 from datetime import datetime
@@ -70,11 +73,13 @@ def is_voting(phase_value: str) -> bool:
 
 
 # --------------------------------------------------------------------------- #
-# step 1: harvest voting observations by playing one full game with `model`
+# step 1: harvest voting observations by playing X full games with `model`,
+# randomly sampling up to Y voting situations per game.
 # reuses an ALREADY-LOADED llm/tokenizer so we don't load the model twice.
 # --------------------------------------------------------------------------- #
 def harvest_voting_observations(
     llm, tokenizer, env_id: str, num_players: int, out_dir: Path,
+    games_per_iter: int = 5, situations_per_game: int = 4,
 ) -> list[Path]:
     # wipe the tmp dir -> each iteration uses only fresh observations
     removed = 0
@@ -85,30 +90,44 @@ def harvest_voting_observations(
         print(f"[Harvest] cleared {removed} old .txt from {out_dir}")
 
     agents = {pid: VLLMTextArenaAgent(llm, tokenizer) for pid in range(num_players)}
-
-    env = ta.make(env_id=env_id)
-    env.reset(num_players=num_players)
-
-    captured: list[dict] = []
-    done = False
-    turn_id = 0
-    while not done:
-        player_id, observation = env.get_observation()
-        phase = get_phase(env, observation)
-        if is_voting(phase):
-            captured.append({"turn_id": turn_id, "player_id": player_id, "observation": observation})
-        agent_out = agents[player_id](observation)
-        done, _ = env.step(action=agent_out["action"])
-        turn_id += 1
-
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     written: list[Path] = []
-    for e in captured:
-        f = out_dir / f"vote_{stamp}_p{e['player_id']}_t{e['turn_id']}.txt"
-        f.write_text(e["observation"], encoding="utf-8")
-        written.append(f)
 
-    print(f"[Harvest] captured {len(written)} voting observations")
+    for game_idx in range(games_per_iter):
+        env = ta.make(env_id=env_id)
+        env.reset(num_players=num_players)
+
+        # collect ALL voting observations of this one game first ...
+        captured: list[dict] = []
+        done = False
+        turn_id = 0
+        while not done:
+            player_id, observation = env.get_observation()
+            phase = get_phase(env, observation)
+            if is_voting(phase):
+                captured.append({"turn_id": turn_id, "player_id": player_id,
+                                 "observation": observation})
+            agent_out = agents[player_id](observation)
+            done, _ = env.step(action=agent_out["action"])
+            turn_id += 1
+
+        # ... then randomly sample up to Y of them (fewer if the game had fewer).
+        # Random (not the first Y) so we don't systematically favor early rounds.
+        if len(captured) > situations_per_game:
+            sampled = random.sample(captured, situations_per_game)
+        else:
+            sampled = captured
+
+        for e in sampled:
+            f = out_dir / f"vote_{stamp}_g{game_idx}_p{e['player_id']}_t{e['turn_id']}.txt"
+            f.write_text(e["observation"], encoding="utf-8")
+            written.append(f)
+
+        print(f"[Harvest] game {game_idx + 1}/{games_per_iter}: "
+              f"{len(captured)} voting situations, kept {len(sampled)}")
+
+    print(f"[Harvest] total kept: {len(written)} voting observations "
+          f"from {games_per_iter} games")
     return written
 
 
@@ -150,6 +169,8 @@ def harvest_and_complete(model: str, tmp_obs_dir: Path, completions_dir: Path,
 
     scenarios = harvest_voting_observations(
         llm, tokenizer, args.env_id, args.num_players, tmp_obs_dir,
+        games_per_iter=args.games_per_iter,
+        situations_per_game=args.situations_per_game,
     )
     if not scenarios:
         del llm, tokenizer
@@ -188,8 +209,14 @@ def main() -> None:
     p.add_argument("--tmp-obs-dir", type=str, default=str(HERE / "tmp_observation_vote"))
     p.add_argument("--completions-dir", type=str, default=str(HERE / "completions_vote_dynamic"))
     p.add_argument("--loop-count", type=int, default=4)
+    p.add_argument("--games-per-iter", type=int, default=5,
+                   help="X: how many full games to play (harvest from) per iteration. "
+                        "More = more genuine scenario diversity, but longer harvest time.")
+    p.add_argument("--situations-per-game", type=int, default=4,
+                   help="Y: max voting situations randomly sampled from each game. "
+                        "Keeps one game from dominating the dataset and caps completion cost.")
     p.add_argument("--num-completions", type=int, default=8)
-    p.add_argument("--temperature", type=float, default=1.2)
+    p.add_argument("--temperature", type=float, default=1.0)
     p.add_argument("--max-tokens", type=int, default=100)
     p.add_argument("--gpu-memory-utilization", type=float, default=0.6)
     p.add_argument("--tensor-parallel-size", type=int, default=1)
