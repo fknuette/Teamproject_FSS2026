@@ -1,94 +1,183 @@
-# Teamproject FSS2026 LLM-Agents
+# Teamproject FSS2026 – LLM Agents
 
-MVP-Pipeline für euer Projekt:
-- Zwei LLMs spielen gegeneinander in TextArena (Self-Play, über `vLLM`)
-- Pro Zug werden Prompt, Reasoning-Trace und Action gespeichert
-- Nach jedem Match wird Win/Loss als Reward vergeben (`1` für Gewinner, `0` für Verlierer)
-- Danach LoRA-Finetuning mit GRPO (`trl`) auf diesen Traces
+Dieses Projekt trainiert ein Sprachmodell durch Self-Play in TextArena:
 
-## 1) Installation
+1. Ein Modell spielt mehrere Rollen in `SecretMafia-v0`.
+2. Prompts, Antworten, Aktionen und Rewards werden als JSONL gespeichert.
+3. Das Modell wird mit GRPO und LoRA auf den erzeugten Daten trainiert.
+4. Der LoRA-Adapter wird für den nächsten Rollout in ein vollständiges Modell gemergt.
+5. Checkpoints können anschließend gegen ein Basismodell oder mit TrueSkill evaluiert werden.
+
+Die folgenden Befehle und Optionen entsprechen den aktuellen CLI-Parsern im Verzeichnis `scripts/`.
+
+## Voraussetzungen und Installation
+
+Das Projekt verlangt Python 3.13 oder neuer und eine CUDA-fähige GPU. Für das verwendete Modell muss genügend GPU-Speicher verfügbar sein.
+
+Installation mit `uv`:
 
 ```bash
 uv sync
 ```
 
-Falls ihr kein `uv` nutzt:
+Alle weiteren Befehle werden aus dem Projektverzeichnis ausgeführt.
+
+## Komplette Online-GRPO-Pipeline
+
+Der Online-Loop führt pro Iteration Self-Play, Datensatzerzeugung, GRPO-/LoRA-Training und das Mergen des neuen Modells aus:
 
 ```bash
-pip install -e .
+uv run python scripts/online_grpo_loop.py \
+  --env-id SecretMafia-v0 \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --num-players 8 \
+  --num-mafia 2 \
+  --loop-count 3 \
+  --games-per-iter 3 \
+  --tensor-parallel-size 1 \
+  --gpu-memory-utilization 0.3 \
+  --work-dir runs/online_grpo \
+  --epochs 1 \
+  --batch-size 2 \
+  --gradient-accumulation-steps 8 \
+  --bf16
 ```
 
-## 2) Self-Play Daten sammeln
+Die wichtigsten Ergebnisse liegen anschließend unter:
 
-Beispiel mit zwei Qwen-Modellen in TicTacToe:
+```text
+runs/online_grpo/
+├── traces/                 # Traces jeder Iteration
+├── datasets/               # Einzelne und zusammengeführte Datensätze
+└── checkpoints/
+    └── iter_<N>/
+        ├── lora_adapter/   # Trainierter Adapter
+        └── merged_model/   # Modell für den nächsten Rollout
+```
+
+Wichtige Optionen:
+
+| Option | Standardwert | Bedeutung |
+|---|---:|---|
+| `--env-id` | `SecretMafia-v0` | TextArena-Environment |
+| `--base-model` | `Qwen/Qwen2.5-7B-Instruct` | Ausgangsmodell |
+| `--num-players` | `8` | Spielerzahl, erlaubt sind 6 bis 15 |
+| `--num-mafia` | `2` | Anzahl der Mafia-Spieler |
+| `--loop-count` | `3` | Anzahl der Rollout-/Trainingsiterationen |
+| `--games-per-iter` | `3` | Spiele pro Iteration |
+| `--tensor-parallel-size` | `1` | Anzahl der GPUs für vLLM Tensor Parallelism |
+| `--gpu-memory-utilization` | `0.3` | Von vLLM verwendeter Anteil des GPU-Speichers |
+| `--work-dir` | `runs/online_grpo` | Ausgabeordner |
+
+Alle verfügbaren Optionen zeigt:
 
 ```bash
-python scripts/self_play_textarena.py \
-	--env-id TicTacToe-v0 \
-	--model-a Qwen/Qwen2.5-3B-Instruct \
-	--model-b Qwen/Qwen2.5-3B-Instruct \
-	--num-games 50 \
-	--output data/selfplay_traces.jsonl
+uv run python scripts/online_grpo_loop.py --help
 ```
 
-Output-Datei: `data/selfplay_traces.jsonl`
+## Nur Self-Play ausführen
 
-Jede Zeile enthält u. a.:
-- `prompt`
-- `reasoning_trace`
-- `action`
-- `final_reward` (1/0 bzw. env-reward)
-- `won` (1/0)
-
-## 3) LoRA + GRPO Training
+Self-Play verwendet ein gemeinsames Modell für alle Spielerrollen:
 
 ```bash
-python scripts/train_grpo_lora.py \
-	--model Qwen/Qwen2.5-3B-Instruct \
-	--data data/selfplay_traces.jsonl \
-	--output-dir outputs/grpo-lora \
-	--epochs 1 \
-	--batch-size 2 \
-	--gradient-accumulation-steps 8 \
-	--bf16
+uv run python scripts/self_play_textarena.py \
+  --model Qwen/Qwen2.5-7B-Instruct \
+  --env-id SecretMafia-v0 \
+  --num-games 3 \
+  --num-players 8 \
+  --num-mafia 2 \
+  --tensor-parallel-size 1 \
+  --gpu-memory-utilization 0.3 \
+  --output data/selfplay_traces.jsonl
 ```
 
-Gespeichert wird das LoRA-Checkpoint unter `outputs/grpo-lora`.
+`--model` ist hierbei verpflichtend. Die Ausgabedatei wird beim Start geleert und danach mit den Turn-Datensätzen der Spiele befüllt.
 
-## 3b) Ein einziger Online-Loop (ohne manuelles Neustarten)
-
-Das folgende Skript macht automatisch pro Iteration:
-1. Rollout (LLM vs LLM in TextArena)
-2. Reward/Trace-Dataset aktualisieren
-3. GRPO + LoRA trainieren
-4. LoRA in ein vollständiges Modell mergen (für nächste vLLM-Runde)
+Alle verfügbaren Optionen zeigt:
 
 ```bash
-python scripts/online_grpo_loop.py \
-	--env-id TicTacToe-v0 \
-	--base-model Qwen/Qwen2.5-3B-Instruct \
-	--loop-count 3 \
-	--games-per-iter 30 \
-	--work-dir runs/online_grpo \
-	--epochs 1 \
-	--batch-size 2 \
-	--gradient-accumulation-steps 8 \
-	--bf16
+uv run python scripts/self_play_textarena.py --help
 ```
 
-Optional:
-- `--opponent-model ...` für festen Gegner
-- `--skip-merge` falls ihr nur Adapter trainieren wollt (dann keine Policy-Aktualisierung für den nächsten Rollout)
+## Checkpoints evaluieren
 
-## 4) Wichtige Projektdateien
+### Ein Checkpoint gegen das Basismodell
 
-- `scripts/self_play_textarena.py`: vLLM Self-Play + Trace-Logging
-- `scripts/train_grpo_lora.py`: GRPO-Training mit LoRA
-- `scripts/online_grpo_loop.py`: durchgehender Rollout→Training-Loop
-- `src/teamproject_fss2026/textarena_utils.py`: Prompt- und Parsing-Utilities
+Ohne `--eval-checkpoint` wird automatisch der neueste verwendbare Ordner `iter_*` aus dem Checkpoint-Verzeichnis ausgewählt:
+
+```bash
+uv run python scripts/evaluation/eval_main.py \
+  --mode simple \
+  --checkpoint-dir runs/online_grpo/checkpoints \
+  --baseline-checkpoint Qwen/Qwen2.5-7B-Instruct \
+  --tensor-parallel-size 1 \
+  --gpu-memory-utilization 0.3
+```
+
+Ein bestimmter Checkpoint wird über seine ID ausgewählt, beispielsweise:
+
+```bash
+uv run python scripts/evaluation/eval_main.py \
+  --mode simple \
+  --checkpoint-dir runs/online_grpo/checkpoints \
+  --eval-checkpoint iter_2
+```
+
+Das Evaluationsskript bevorzugt `<checkpoint-dir>/<ID>/merged_model`. Falls dieser Ordner nicht existiert, verwendet es `<checkpoint-dir>/<ID>/lora_adapter/final`.
+
+### TrueSkill-Evaluation
+
+```bash
+uv run python scripts/evaluation/eval_main.py \
+  --mode trueskill \
+  --checkpoint-dir runs/online_grpo/checkpoints \
+  --baseline-checkpoint Qwen/Qwen2.5-7B-Instruct \
+  --min-games-per-team-role 3
+```
+
+Standardmäßig wird die bestehende TrueSkill-Registry zu Beginn zurückgesetzt. Um bestehende Ratings weiterzuverwenden:
+
+```bash
+uv run python scripts/evaluation/eval_main.py \
+  --mode trueskill \
+  --checkpoint-dir runs/online_grpo/checkpoints \
+  --no-reset-registry
+```
+
+Mit `--full` werden im TrueSkill-Modus alle neu entdeckten Checkpoints ausgewertet.
+
+```bash
+uv run python scripts/evaluation/eval_main.py \
+  --mode trueskill \
+  --checkpoint-dir runs/online_grpo/checkpoints \
+  --full
+```
+
+Die Ergebnisse werden standardmäßig unter `runs/online_grpo/evals/<mode>/results.jsonl` gespeichert.
+
+## Training separat ausführen
+
+Die Trainingslogik befindet sich in `scripts/grpo_training/cli.py` und wird vom Online-Loop direkt über `run_training()` aufgerufen. Die Datei definiert zwar eine `main()`-Funktion, ruft sie aktuell aber nicht über einen `__main__`-Block auf. Deshalb startet
+
+```bash
+uv run python scripts/grpo_training/cli.py
+```
+
+derzeit kein Training. Für einen vollständigen Lauf sollte `scripts/online_grpo_loop.py` verwendet werden.
+
+## Relevante Projektdateien
+
+- `scripts/argument_parser.py`: zentrale CLI-Argumente und Standardwerte
+- `scripts/self_play_textarena.py`: Self-Play und Trace-Erzeugung
+- `scripts/online_grpo_loop.py`: vollständiger Rollout-/Trainingsloop
+- `scripts/grpo_training/`: Dataset, Modelle, Loss und GRPO-Training
+- `scripts/evaluation/`: einfache und TrueSkill-basierte Evaluation
+- `src/teamproject_fss2026/textarena_utils.py`: TextArena-Hilfsfunktionen
 
 ## Hinweise
 
-- Für echte große Modelle braucht ihr genügend VRAM/GPU.
-- Startet zuerst mit kleinen Environments (`TicTacToe-v0`) und kleinen Modellen.
-- Wenn ihr SecretMafia trainieren wollt, erhöht später schrittweise Komplexität und Match-Anzahl.
+- Die Spielerzahl muss zwischen 6 und 15 liegen.
+- Neben der Mafia müssen mindestens ein Doctor und ein Detective Platz haben. Deshalb muss `--num-mafia` zwischen 1 und `num_players - 2` liegen.
+- Ein größerer Wert für `--tensor-parallel-size` verteilt vLLM auf mehrere GPUs.
+- Falls vLLM beim Start zu viel Speicher reserviert, kann `--gpu-memory-utilization` reduziert werden.
+- Das Standardmodell mit 7 Milliarden Parametern benötigt deutlich mehr GPU-Speicher als kleinere Qwen-Varianten.
