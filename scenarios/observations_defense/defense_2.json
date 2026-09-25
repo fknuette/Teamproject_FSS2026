@@ -1,0 +1,12 @@
+{
+  "player_id": 4,
+  "history": [
+    "[Player 6] Spieler 4 hat gestern stark gegen 0 argumentiert. 0 war Dorfbewohner.",
+    "[Player 3] Danach hat 4 seine Einschätzung ohne Begründung geändert.",
+    "[Player 7] Spieler 4, wie passt dieser Wechsel zusammen?"
+  ],
+  "observation": "[GAME] Welcome to Secret Mafia! You are Player 4.\nYour role is unknown to the other players. During discussions, your public statement is broadcast to everyone.\n\n[GAME] Daytime discussion. Public history:\n[Player 6] Spieler 4 hat gestern stark gegen 0 argumentiert. 0 war Dorfbewohner.\n[Player 3] Danach hat 4 seine Einschätzung ohne Begründung geändert.\n[Player 7] Spieler 4, wie passt dieser Wechsel zusammen?\n[GAME] Discuss phase: The players suspect you. Respond to their accusations now.",
+  "verdacht_pre": 7.333333333333333,
+  "judge_mode": "mock",
+  "judge_model": ""
+}
