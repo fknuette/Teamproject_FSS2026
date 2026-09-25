@@ -236,11 +236,38 @@ def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
         print(f"Discovered and registered checkpoint: {eval_checkpoint}")
         registry.save()
 
+    # Compute available checkpoints (registered and present on disk).
+    # Require that an iteration has a `merged_model` directory to be considered
+    # available. Treat remote/baseline model ids (e.g. 'Qwen/...') as available.
+    available: list[str] = []
+    for ckpt_id in registry.all_ids():
+        entry_path = Path(registry.get(ckpt_id).path)
+
+        # 1) Standard location under --checkpoint-dir: <checkpoint_dir>/iter_X/merged_model
+        merged_standard = Path(args.checkpoint_dir) / ckpt_id / "merged_model"
+        if merged_standard.is_dir():
+            available.append(ckpt_id)
+            continue
+
+        # 2) Registered path explicitly points to a merged_model dir
+        if entry_path.is_dir() and entry_path.name == "merged_model":
+            available.append(ckpt_id)
+            continue
+
+        # 3) Remote/baseline model ids (e.g., 'Qwen/Qwen2.5-7B-Instruct') - keep available
+        # Heuristic: contains a slash and is not inside the local checkpoint dir
+        reg_path_str = registry.get(ckpt_id).path
+        if "/" in reg_path_str and not str(Path(reg_path_str)).startswith(str(Path(args.checkpoint_dir))):
+            available.append(ckpt_id)
+            continue
+
+        # Otherwise not available (e.g., iter_X exists but no merged_model inside)
+
     matchmaker = RandomMatchmaker(
         registry=registry,
         min_games_per_team_role=args.min_games_per_team_role,
     )
-    matchups_dict = matchmaker.get_matchups(eval_checkpoint)#str(Path(args.checkpoint_dir) / args.eval_checkpoint / "lora_adapter" / "final"))
+    matchups_dict = matchmaker.get_matchups(eval_checkpoint, available_checkpoints=available)
     total_games = sum(matchups_dict.values())
     print(f"TrueSkill mode — evaluating checkpoint: {eval_checkpoint}")
     #print(f"Checkpoint dir: {args.checkpoint_dir}  ({len(discovered)} discovered)")

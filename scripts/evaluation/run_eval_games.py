@@ -135,6 +135,11 @@ def run_eval_games(
     with output_path.open("w", encoding="utf-8") as f:
         for result in all_results:
             f.write(json.dumps(asdict(result), ensure_ascii=False) + "\n")
+
+    try:
+        factory.clear_cache()
+    except Exception:
+        pass
     
     print(f"Wrote {len(all_results)} eval game results to {output_path}")
     return all_results
