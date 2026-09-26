@@ -75,7 +75,7 @@ def generate_completions(
         if not isinstance(scenario_data, dict) or not isinstance(scenario_data.get("observation"), str):
             raise ValueError(f"JSON scenario needs a string 'observation': {scenario_path}")
         observation = scenario_data["observation"]
-        for key in ("verdacht_pre", "judge_mode", "judge_model"):
+        for key in ("verdacht_pre", "judge_observation", "judge_mode", "judge_model"):
             if key in scenario_data:
                 scenario_metadata[key] = scenario_data[key]
     if not observation.strip():
