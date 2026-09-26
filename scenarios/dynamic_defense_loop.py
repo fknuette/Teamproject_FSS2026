@@ -75,9 +75,9 @@ def harvest_and_generate(
             env.reset(num_players=args.num_players)
             candidates: list[dict] = []
             done = False
-            turn_id = 0
+            turn_id = 0 
             while not done:
-                player_id, observation = env.get_observation()
+                player_id, observation = env.get_observation() # TODO: Here we could do dynamic versus static prompt tempate
                 if "discuss" in get_phase(env, observation).lower() and is_defense_situation(
                     observation, player_id, args.accusation_window
                 ):
