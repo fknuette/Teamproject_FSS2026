@@ -22,3 +22,6 @@ scenarios/completions_vote_dynamic/
 scenarios/completions_vote_eval/
 scenarios/runs/
 scenarios/tmp_observation_vote/
+
+
+tmp_*
