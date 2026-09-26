@@ -26,12 +26,14 @@ def assign_defense_rewards(
     for index, record in enumerate(records):
         if not isinstance(record.get("observation"), str) or not isinstance(record.get("response"), str):
             raise ValueError(f"Record {index} needs string observation and response")
+        if "judge_observation" in record and not isinstance(record["judge_observation"], str):
+            raise ValueError(f"Record {index} has invalid judge_observation")
         baseline = record.get("verdacht_pre")
         if isinstance(baseline, bool) or not isinstance(baseline, (int, float)) or not 1 <= baseline <= 10:
             raise ValueError(f"Record {index} has no valid verdacht_pre (1-10)")
 
     for record in records:
-        post = evaluate_suspicion(record["observation"], record["response"], evaluator)
+        post = evaluate_suspicion(record.get("judge_observation", record["observation"]), record["response"], evaluator)
         record["verdacht_post"] = post
         record["reward"] = record["verdacht_pre"] - post
 
