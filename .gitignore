@@ -13,3 +13,12 @@ scripts/runs/
 runs/
 # base modell
 base/
+# base model
+base/
+#scenairos
+scenarios/completions/
+scenarios/completions_vote/
+scenarios/completions_vote_dynamic/
+scenarios/completions_vote_eval/
+scenarios/runs/
+scenarios/tmp_observation_vote/
