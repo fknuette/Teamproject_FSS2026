@@ -136,14 +136,12 @@ def build_multi_judge_messages(
 ) -> list[dict[str, str]]:
     """Build messages for one multi-player judge call.
 
-    Args:
-        observation: Raw game observation (used only to extract the system prompt).
-        public_game_state: Public-only dialogue (from ``judge_context()``).
-        response: Completion to evaluate, or ``None`` for pre-evaluation.
-        judge_id: Player ID acting as judge (must not be in other_player_ids).
-        other_player_ids: All player IDs the judge should rate.
+    The acting player stays in the scored set for the scenario, but the judge
+    itself is never allowed to rate its own ID. The speaker is also excluded from
+    the judge pool before selection, so the same player never acts as judge.
     """
     system = build_judge_system_prompt(observation, judge_id)
+    other_player_ids = [pid for pid in other_player_ids if pid != judge_id]
     player_list = ", ".join(str(p) for p in other_player_ids)
     user = f"Game State:\n{public_game_state}\n\n"
     if response is not None:
