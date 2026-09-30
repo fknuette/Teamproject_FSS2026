@@ -1,4 +1,9 @@
-"""Assign defense rewards using three local or mocked villager judges."""
+"""Assign defense rewards using three local or mocked villager judges.
+
+Two reward functions are provided:
+- ``assign_defense_rewards``: legacy single-player reward (verdacht_pre - verdacht_post).
+- ``assign_team_aware_rewards``: team-aware multi-player reward for the dynamic loop.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +11,7 @@ import argparse
 import json
 from pathlib import Path
 
-from defense_judge import Evaluator, evaluate_suspicion, make_evaluator
+from defense_judge import Evaluator, evaluate_all_suspicions, evaluate_suspicion, make_evaluator
 
 
 def assign_defense_rewards(
@@ -42,6 +47,78 @@ def assign_defense_rewards(
     with out_path.open("w", encoding="utf-8") as output:
         for record in records:
             output.write(json.dumps(record, ensure_ascii=False) + "\n")
+    return records
+
+
+def assign_team_aware_rewards(
+    records: list[dict],
+    output_path: str | Path = "",
+    input_path: str | Path = "",
+    evaluator: Evaluator | None = None,
+) -> list[dict]:
+    """Evaluate post-completion suspicion of all players and compute team-aware rewards.
+
+    Each record must already contain:
+        observation, response, player_id, player_team, judge_ids,
+        all_player_ids, villager_ids, mafia_ids,
+        suspicion_pre (dict[str, float]),
+        judge_observation (public-only dialogue string).
+
+    Reward formula:
+        Mafia speaker: Σ(post[v]-pre[v] for villagers) + Σ(pre[m]-post[m] for mafia)
+        Village speaker: Σ(pre[v]-post[v] for villagers) + Σ(post[m]-pre[m] for mafia)
+    """
+    if not records:
+        raise ValueError("No records provided")
+    if evaluator is None:
+        evaluator = make_evaluator("mock")
+
+    for index, record in enumerate(records):
+        for field in ("observation", "response", "player_team", "judge_observation"):
+            if not isinstance(record.get(field), str):
+                raise ValueError(f"Record {index} missing or invalid field '{field}'")
+        for list_field in ("judge_ids", "all_player_ids", "villager_ids", "mafia_ids"):
+            if not isinstance(record.get(list_field), list):
+                raise ValueError(f"Record {index} missing or invalid field '{list_field}'")
+        if not isinstance(record.get("suspicion_pre"), dict):
+            raise ValueError(f"Record {index} missing or invalid field 'suspicion_pre'")
+        if record["player_team"] not in ("Mafia", "Village"):
+            raise ValueError(f"Record {index} has unknown player_team: {record['player_team']!r}")
+
+    for record in records:
+        suspicion_post = evaluate_all_suspicions(
+            observation=record["observation"],
+            public_game_state=record["judge_observation"],
+            response=record["response"],
+            judge_ids=record["judge_ids"],
+            all_player_ids=record["all_player_ids"],
+            evaluator=evaluator,
+        )
+        record["suspicion_post"] = suspicion_post
+
+        pre = {int(k): float(v) for k, v in record["suspicion_pre"].items()}
+        post = suspicion_post
+        villagers: list[int] = record["villager_ids"]
+        mafia: list[int] = record["mafia_ids"]
+
+        if record["player_team"] == "Mafia":
+            reward = (
+                sum(post[v] - pre[v] for v in villagers)
+                + sum(pre[m] - post[m] for m in mafia)
+            )
+        else:
+            reward = (
+                sum(pre[v] - post[v] for v in villagers)
+                + sum(post[m] - pre[m] for m in mafia)
+            )
+        record["reward"] = reward
+
+    out_path = Path(output_path) if output_path else (Path(input_path) if input_path else None)
+    if out_path is not None:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        with out_path.open("w", encoding="utf-8") as fh:
+            for record in records:
+                fh.write(json.dumps(record, ensure_ascii=False) + "\n")
     return records
 
 
