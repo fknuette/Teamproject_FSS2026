@@ -89,6 +89,14 @@ def extract_roles(env) -> dict[int, dict[str, str]]:
     return result
 
 
+def select_judge_ids(player_id: int, villager_ids: list[int], max_judges: int = 3) -> list[int]:
+    """Pick other villagers as judges; the acting player remains in the scored set."""
+    eligible = [pid for pid in villager_ids if pid != player_id]
+    if not eligible:
+        return []
+    return random.sample(eligible, min(max_judges, len(eligible)))
+
+
 def harvest_and_generate(
     model: str, tag: str, raw_dir: Path, completions_dir: Path, args: argparse.Namespace
 ) -> list[dict]:
@@ -152,8 +160,8 @@ def harvest_and_generate(
             selected = random.sample(captured, min(len(captured), args.situations_per_game))
 
             for entry in selected:
-                # Pick 3 random villager judges (fall back to fewer if not enough villagers)
-                judge_ids = random.sample(villager_ids, min(3, len(villager_ids)))
+                # Never let the speaking player act as a judge. Choose only other villagers.
+                judge_ids = select_judge_ids(entry["player_id"], villager_ids, max_judges=3)
                 entry["judge_ids"] = judge_ids
 
                 stem = f"{tag}_{stamp}_g{game_idx}_p{entry['player_id']}_t{entry['turn_id']}"
