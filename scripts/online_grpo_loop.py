@@ -169,6 +169,8 @@ def main() -> None:
                     f"iter_{iter_idx}",
                     "--checkpoint-dir",
                     str(ckpt_dir),
+                    "--eval-window-size",
+                    str(max(1, int(getattr(args, "eval_window_size", 1)))),
                     "--no-reset-registry",
                     "--gpu-memory-utilization",
                     "0.25",

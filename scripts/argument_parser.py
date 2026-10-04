@@ -86,6 +86,12 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Evaluate every N training iterations when --eval-inside-training is set (N>=1)",
     )
+    parser.add_argument(
+        "--eval-window-size",
+        type=int,
+        default=1,
+        help="Recent-model window size for evaluation. This counts how many previous checkpoints are included in addition to the current model; the base model is always included.",
+    )
   
     
 def _add_rollout_args(parser: argparse.ArgumentParser) -> None:

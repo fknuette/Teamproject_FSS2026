@@ -67,7 +67,7 @@ def main() -> None:
     parser.add_argument(
         "--mode",
         choices=["simple", "trueskill"],
-        default="simple",
+        default="trueskill",
         help="Evaluation mode: 'simple' (fixed baseline) or 'trueskill' (persistent ratings)",
     )
     parser.add_argument(
@@ -98,6 +98,18 @@ def main() -> None:
         "--full",
         action=argparse.BooleanOptionalAction,
         default=False,
+    )
+    parser.add_argument(
+        "--eval-window-size",
+        type=int,
+        default=1,
+        help="Recent-model window size for evaluation. This counts previous checkpoints beyond the current one; the base model is always included.",
+    )
+    parser.add_argument(
+        "--eval-frequency",
+        type=int,
+        default=1,
+        help="When --full is used, evaluate only every N discovered checkpoints. Example: 3 means iterate 1, 4, 7, ...",
     )
 
     args = parser.parse_args()
@@ -196,6 +208,28 @@ def prepare_registry_path(registry_path: Path, *, reset_registry: bool) -> Path:
     return registry_path
 
 
+def _select_recent_window(discovered: list[tuple[str, str]], *, window_size: int, eval_checkpoint: str | None = None) -> list[str]:
+    """Return a window of checkpoint ids: current + recent predecessors + base model is handled elsewhere."""
+    if window_size is None or window_size < 0:
+        window_size = 0
+    if not discovered:
+        return []
+
+    all_ids = [ckpt_id for ckpt_id, _ in discovered]
+    if eval_checkpoint is not None:
+        if eval_checkpoint not in all_ids:
+            return [eval_checkpoint]
+        current_index = all_ids.index(eval_checkpoint)
+        start_index = max(0, current_index - window_size)
+        return all_ids[start_index:current_index + 1]
+
+    if window_size <= 0:
+        return [all_ids[-1]]
+    if len(all_ids) <= window_size + 1:
+        return all_ids
+    return all_ids[-(window_size + 1):]
+
+
 def _run_trueskill_mode(args, output_dir: Path) -> None:
     """Run evaluation in TrueSkill mode with a persistent checkpoint registry."""
     registry_path = (
@@ -214,20 +248,29 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
 
     if args.full:
         discovered = _discover_checkpoints(Path(args.checkpoint_dir))
-        newly_discovered = [
-            (ckpt_id, ckpt_path)
-            for ckpt_id, ckpt_path in discovered
-            if ckpt_id not in registry.all_ids()
-        ]
-        for ckpt_id, ckpt_path in newly_discovered:
-            ##registry.register(ckpt_id, ckpt_path)
-            #registry.save()
-            run_single_eval_game(ckpt_id, args, registry, output_dir)
+        freq = max(1, int(getattr(args, "eval_frequency", 1)))
+        selected = discovered[::freq]
+        print(f"Full TrueSkill evaluation frequency: every {freq} checkpoint(s)")
+        print(f"Evaluating checkpoints: {[ckpt_id for ckpt_id, _ in selected]}")
+
+        for ckpt_id, ckpt_path in selected:
+            if ckpt_id in registry.all_ids():
+                continue
+            run_single_eval_game(
+                ckpt_id,
+                args,
+                registry,
+                output_dir,
+                recent_window=set(_select_recent_window(discovered, window_size=max(0, int(getattr(args, "eval_window_size", 1))), eval_checkpoint=ckpt_id)) | {args.baseline_checkpoint},
+            )
 
     else:
-        run_single_eval_game(args.eval_checkpoint, args, registry, output_dir)
+        window_size = max(0, int(getattr(args, "eval_window_size", 1)))
+        recent_window = set(_select_recent_window(_discover_checkpoints(Path(args.checkpoint_dir)), window_size=window_size, eval_checkpoint=args.eval_checkpoint))
+        run_single_eval_game(args.eval_checkpoint, args, registry, output_dir, recent_window=recent_window | {args.baseline_checkpoint})
 
-def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
+
+def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path, recent_window: set[str] | None = None):
     if eval_checkpoint not in registry.all_ids():
         checkpoint_path = _resolve_checkpoint_path(
             Path(args.checkpoint_dir), eval_checkpoint
@@ -241,6 +284,9 @@ def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
     # available. Treat remote/baseline model ids (e.g. 'Qwen/...') as available.
     available: list[str] = []
     for ckpt_id in registry.all_ids():
+        if recent_window is not None and ckpt_id not in recent_window:
+            continue
+
         entry_path = Path(registry.get(ckpt_id).path)
 
         # 1) Standard location under --checkpoint-dir: <checkpoint_dir>/iter_X/merged_model
@@ -262,6 +308,9 @@ def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path):
             continue
 
         # Otherwise not available (e.g., iter_X exists but no merged_model inside)
+
+    if recent_window is not None and not available:
+        available = [args.baseline_checkpoint, eval_checkpoint]
 
     matchmaker = RandomMatchmaker(
         registry=registry,
