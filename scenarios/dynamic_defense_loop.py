@@ -331,7 +331,7 @@ def main() -> None:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     args = parser.parse_args()
 
-if min(args.loop_count, args.games_per_iter, args.situations_per_game) < 1:
+    if min(args.loop_count, args.games_per_iter, args.situations_per_game) < 1:
         parser.error("loop, games, and situations must be >= 1")
     if args.num_completions < 2:
         parser.error("--num-completions must be >= 2 for GRPO")
