@@ -92,8 +92,31 @@ def _add_loop_args(parser: argparse.ArgumentParser) -> None:
         default=1,
         help="Recent-model window size for evaluation. This counts how many previous checkpoints are included in addition to the current model; the base model is always included.",
     )
-  
-    
+    parser.add_argument(
+        "--eval-output-dir",
+        type=str,
+        default=None,
+        help="Base directory for in-training eval outputs. Each iteration writes a subdirectory like <eval-output-dir>/iter_<n>.",
+    )
+    parser.add_argument(
+        "--eval-registry-path",
+        type=str,
+        default=None,
+        help="Path to the TrueSkill checkpoint registry used by in-training eval. Defaults to <eval-output-dir>/checkpoint_registry.json.",
+    )
+    parser.add_argument(
+        "--min-games-per-team-role",
+        type=int,
+        default=3,
+        help="Minimum games per team/role pair used by the TrueSkill evaluator.",
+    )
+    parser.add_argument(
+        "--baseline-checkpoint",
+        type=str,
+        default="Qwen/Qwen2.5-7B-Instruct",
+        help="Baseline checkpoint used by the TrueSkill evaluator during in-training eval.",
+    )
+
 def _add_rollout_args(parser: argparse.ArgumentParser) -> None:
     """Rollout/inference arguments (vLLM)."""
     parser.add_argument("--tensor-parallel-size", type=int, default=1)

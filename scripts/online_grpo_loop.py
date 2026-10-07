@@ -63,6 +63,59 @@ def prune_merged_models(ckpt_dir: Path, keep: int = 2) -> None:
             print(f"[Prune] Failed to remove {path}; continuing")
 
 
+def build_in_training_eval_command(
+    work_dir: Path,
+    checkpoint_dir: Path,
+    iter_idx: int,
+    *,
+    gpu_memory_utilization: float = 0.25,
+    eval_window_size: int = 1,
+    min_games_per_team_role: int = 3,
+    baseline_checkpoint: str = "Qwen/Qwen2.5-7B-Instruct",
+    eval_output_dir: Path | None = None,
+    eval_registry_path: Path | None = None,
+    eval_script: Path | None = None,
+) -> tuple[list[str], Path, Path]:
+    """Build a per-iteration TrueSkill eval command.
+
+    All eval configuration lives in the CLI arguments and is forwarded here to keep
+    the train-time evaluator aligned with the standalone eval entrypoint.
+    """
+    eval_root = Path(eval_output_dir) if eval_output_dir is not None else work_dir / "evals" / "trueskill"
+    output_dir = eval_root / f"iter_{iter_idx}"
+    registry_path = Path(eval_registry_path) if eval_registry_path is not None else eval_root / "checkpoint_registry.json"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    registry_path.parent.mkdir(parents=True, exist_ok=True)
+
+    if eval_script is None:
+        eval_script = Path(__file__).resolve().parent / "evaluation" / "eval_main.py"
+
+    cmd = [
+        sys.executable,
+        str(eval_script),
+        "--mode",
+        "trueskill",
+        "--eval-checkpoint",
+        f"iter_{iter_idx}",
+        "--checkpoint-dir",
+        str(checkpoint_dir),
+        "--output-dir",
+        str(output_dir),
+        "--registry-path",
+        str(registry_path),
+        "--eval-window-size",
+        str(max(0, int(eval_window_size))),
+        "--min-games-per-team-role",
+        str(max(1, int(min_games_per_team_role))),
+        "--baseline-checkpoint",
+        str(baseline_checkpoint),
+        "--no-reset-registry",
+        "--gpu-memory-utilization",
+        str(gpu_memory_utilization),
+    ]
+    return cmd, output_dir, registry_path
+
+
 def main() -> None:
     """Main entry point for the online GRPO loop."""
     parser = build_parser(context="online_grpo_loop")
@@ -157,25 +210,24 @@ def main() -> None:
                 # continue main loop without running external eval
                 continue
             try:
-                # eval_main.py lives in the sibling `evaluation` directory under `scripts`
-                eval_script = Path(__file__).resolve().parent / "evaluation" / "eval_main.py"
-                
-                eval_cmd = [
-                    sys.executable,
-                    str(eval_script),
-                    "--mode",
-                    "trueskill",
-                    "--eval-checkpoint",
-                    f"iter_{iter_idx}",
-                    "--checkpoint-dir",
-                    str(ckpt_dir),
-                    "--eval-window-size",
-                    str(max(1, int(getattr(args, "eval_window_size", 1)))),
-                    "--no-reset-registry",
-                    "--gpu-memory-utilization",
-                    "0.25",
-                ]
+                eval_root = Path(args.eval_output_dir) if getattr(args, "eval_output_dir", None) else work_dir / "evals" / "trueskill"
+                registry_path = Path(args.eval_registry_path) if getattr(args, "eval_registry_path", None) else eval_root / "checkpoint_registry.json"
+                eval_window_size = max(0, int(getattr(args, "eval_window_size", 1)))
+                min_games_per_team_role = max(1, int(getattr(args, "min_games_per_team_role", 3)))
+                eval_cmd, eval_output_dir, registry_path = build_in_training_eval_command(
+                    work_dir=work_dir,
+                    checkpoint_dir=ckpt_dir,
+                    iter_idx=iter_idx,
+                    gpu_memory_utilization=0.25,
+                    eval_window_size=eval_window_size,
+                    min_games_per_team_role=min_games_per_team_role,
+                    baseline_checkpoint=getattr(args, "baseline_checkpoint", "Qwen/Qwen2.5-7B-Instruct"),
+                    eval_output_dir=eval_root,
+                    eval_registry_path=registry_path,
+                )
                 print(f"[Eval] Running TrueSkill eval subprocess: {' '.join(eval_cmd)}")
+                print(f"[Eval] Results dir: {eval_output_dir}")
+                print(f"[Eval] Registry path: {registry_path}")
                 # ensure some cleanup before spawning eval subprocess
                 gc.collect()
                 torch.cuda.empty_cache()
