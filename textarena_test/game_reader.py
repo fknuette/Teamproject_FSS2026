@@ -50,14 +50,14 @@ def _vote_target(row: dict) -> Optional[int]:
     return target
 
 
-def _action_outcomes(rows: list[dict]) -> dict[int, dict]:
+def _action_outcomes(rows: list[dict], roles: Optional[dict[int, tuple[str, str]]] = None) -> dict[int, dict]:
     """Replay target validity and retries using Secret Mafia's default rules.
 
     Observations precede actions and contain repeated history. Count each action
     once, not each warning. Infer a fatal second error even on the final row,
     whose resulting observation is absent from the trace.
     """
-    roles = _roles_from_trace(rows)
+    roles = _roles_from_trace(rows) if roles is None else roles
     alive = set(roles)
     outcomes = {}
     previous_invalid_player = None
