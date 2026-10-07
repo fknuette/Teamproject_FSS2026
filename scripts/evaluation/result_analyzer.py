@@ -1,4 +1,4 @@
-"""Simple evaluation result analysis."""
+"""Winrate analysis for SimplePairMatchmaker and TrueSkill results."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ DEFAULT_RESULTS_PATH = (
     / "runs"
     / "online_grpo"
     / "evals"
-    / "iter_1_vs_base"
+    / "trueskill"
     / "results.jsonl"
 )
 
@@ -61,8 +61,8 @@ def evaluate_trueskill_eval_winrate(
 ) -> str:
     """Return a winrate report for eval_checkpoint from TrueSkill game results.
 
-    Tracks stats per player occurrence so each game contributes exactly one
-    entry for the eval checkpoint regardless of team size.
+    Tracks stats per player occurrence. If the checkpoint controls multiple
+    players in a game, each player contributes one entry.
     """
     results = _load_jsonl(Path(results_path))
     stats: dict[str, dict[str, Any]] = {}
@@ -193,7 +193,7 @@ def _role_sort_key(role: str) -> tuple[int, str]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="Analyze SimplePairMatchmaker winrates from results.jsonl."
+        description="Analyze SimplePairMatchmaker or TrueSkill winrates from results.jsonl."
     )
     parser.add_argument(
         "results_path",
@@ -202,9 +202,21 @@ def main() -> None:
         default=DEFAULT_RESULTS_PATH,
         help=f"Path to results.jsonl (default: {DEFAULT_RESULTS_PATH})",
     )
+    parser.add_argument(
+        "--eval-checkpoint", "--model",
+        help="Analyze TrueSkill results for this exact checkpoint ID (e.g. iter_1). "
+             "Without this option, use SimplePairMatchmaker analysis.",
+    )
     args = parser.parse_args()
 
-    print(evaluate_simple_matchmaking_winrate(args.results_path))
+    try:
+        if args.eval_checkpoint is not None:
+            report = evaluate_trueskill_eval_winrate(args.results_path, args.eval_checkpoint)
+        else:
+            report = evaluate_simple_matchmaking_winrate(args.results_path)
+    except (OSError, ValueError) as error:
+        parser.error(str(error))
+    print(report)
 
 
 if __name__ == "__main__":
