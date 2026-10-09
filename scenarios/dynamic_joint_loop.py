@@ -50,9 +50,13 @@ for subdir in ("src", "scripts"):
         sys.path.insert(0, module_dir)
 
 from dynamic_vote_loop import get_phase, is_voting
+from dynamic_defense_loop import extract_roles, select_judge_ids
 from assign_defense_rewards import assign_team_aware_rewards
 from assign_vote_rewards import assign_vote_rewards
 from completion_generator import generate_completions
+from defense_harvest import judge_context
+from defense_judge import evaluate_all_suspicions, make_evaluator
+from self_play_textarena import VLLMTextArenaAgent
 from teamproject_fss2026.textarena_utils import build_agent_prompt, extract_phase
 
 
@@ -139,6 +143,32 @@ def apply_reward_to_records(records: list[dict], action_type: str) -> list[dict]
     return records
 
 
+def debug_summary(rows: list[dict], label: str) -> None:
+    """Print a concise reward/phase summary for mixed-loop debugging."""
+    if not rows:
+        print(f"[Debug] {label}: 0 rows")
+        return
+
+    by_action: dict[str, list[dict]] = defaultdict(list)
+    for row in rows:
+        action_type = str(row.get("action_type", "vote")).lower()
+        by_action[action_type].append(row)
+
+    print(f"[Debug] {label}: total={len(rows)}")
+    for action_type, group in sorted(by_action.items()):
+        rewards = [float(r.get("reward", 0.0)) for r in group if "reward" in r]
+        if rewards:
+            mean_reward = sum(rewards) / len(rewards)
+            min_reward = min(rewards)
+            max_reward = max(rewards)
+            print(
+                f"[Debug] {label} action={action_type}: count={len(group)} "
+                f"reward_mean={mean_reward:.4f} reward_min={min_reward:.4f} reward_max={max_reward:.4f}"
+            )
+        else:
+            print(f"[Debug] {label} action={action_type}: count={len(group)} reward_missing")
+
+
 def score_joint_rollouts(rows: list[dict]) -> list[dict]:
     """Attach task-specific rewards and keep a unified dataset layout."""
     scored: list[dict] = []
@@ -159,16 +189,44 @@ def score_joint_rollouts(rows: list[dict]) -> list[dict]:
     final_rows: list[dict] = []
     for action_type, group_rows in by_action.items():
         final_rows.extend(apply_reward_to_records(group_rows, action_type))
+
+    debug_summary(final_rows, "scored_joint_rollouts")
     return final_rows
+
+
+def _resolve_artifact_paths(row: dict, action_type: str, artifact_root: Path | None = None) -> tuple[Path | None, Path | None]:
+    """Return stable artifact paths for the scenario and its completion JSONL."""
+    if artifact_root is None:
+        return None, None
+
+    artifact_root = Path(artifact_root)
+    scenario_dir = artifact_root / "observations"
+    completion_dir = artifact_root / "completions"
+    scenario_dir.mkdir(parents=True, exist_ok=True)
+    completion_dir.mkdir(parents=True, exist_ok=True)
+
+    game_id = int(row.get("game_id", 0))
+    player_id = int(row.get("player_id", 0))
+    turn_id = int(row.get("turn_id", 0))
+    stem = f"{action_type}_g{game_id}_p{player_id}_t{turn_id}"
+    scenario_path = scenario_dir / f"{stem}.txt"
+    output_path = completion_dir / f"{stem}.jsonl"
+    return scenario_path, output_path
 
 
 def generate_joint_rollouts(model: str, rows: list[dict], args: argparse.Namespace) -> list[dict]:
     """Generate completions for harvested vote/defense scenarios and reward them.
 
-    This is the missing bridge between the live-harvest stage and the mixed GRPO
-    training stage: every harvested observation gets N completions, then the
-    existing vote or defense reward path is applied before the dataset is mixed.
+    The actor runtime is kept alive only for the generation pass. Once all
+    completions are produced, the actor is torn down before judge evaluation so
+    the local judge does not overlap the same vLLM model instance on GPU memory.
     """
+    artifact_root = Path(args.output_dir) / "artifacts" if getattr(args, "output_dir", None) else None
+    judge_gpu_memory_utilization = (
+        min(float(args.gpu_memory_utilization), 0.35)
+        if getattr(args, "judge_mode", "local") == "local"
+        else float(args.gpu_memory_utilization)
+    )
     llm = LLM(
         model=model,
         tensor_parallel_size=args.tensor_parallel_size,
@@ -187,21 +245,22 @@ def generate_joint_rollouts(model: str, rows: list[dict], args: argparse.Namespa
         if not isinstance(scenario, str) or not scenario.strip():
             continue
 
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False, encoding="utf-8") as handle:
-            handle.write(scenario)
-            scenario_path = Path(handle.name)
+        scenario_path, output_path = _resolve_artifact_paths(row, action_type, artifact_root)
+        if scenario_path is not None:
+            scenario_path.write_text(scenario, encoding="utf-8")
+        if output_path is not None:
+            output_path.parent.mkdir(parents=True, exist_ok=True)
 
-        output_path = Path(tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False).name)
         try:
             records = generate_completions(
-                scenario=str(scenario_path),
+                scenario=str(scenario_path) if scenario_path is not None else scenario,
                 model=model,
                 player_id=int(row.get("player_id", 0)),
                 num_completions=int(args.num_completions),
                 game_id=int(row.get("game_id", idx)),
                 temperature=float(args.temperature),
                 max_tokens=int(args.max_tokens),
-                output=str(output_path),
+                output=str(output_path) if output_path is not None else None,
                 llm=llm,
                 tokenizer=tokenizer,
             )
@@ -219,30 +278,45 @@ def generate_joint_rollouts(model: str, rows: list[dict], args: argparse.Namespa
                 rec["mafia_ids"] = row.get("mafia_ids", [])
                 rec["suspicion_pre"] = row.get("suspicion_pre", {})
                 generated.append(rec)
-
-            if action_type == "vote":
-                assign_vote_rewards(str(output_path))
-            else:
-                required_field_names = {"judge_ids", "all_player_ids", "villager_ids", "mafia_ids", "judge_observation", "player_team", "suspicion_pre"}
-                if required_field_names.issubset(set(row.keys())):
-                    assign_team_aware_rewards(
-                        records,
-                        output_path=str(output_path),
-                    )
-                else:
-                    for rec in records:
-                        rec["reward"] = 0.0
-                    with output_path.open("w", encoding="utf-8") as handle:
-                        for rec in records:
-                            handle.write(json.dumps(rec, ensure_ascii=False) + "\n")
         finally:
-            scenario_path.unlink(missing_ok=True)
-            output_path.unlink(missing_ok=True)
+            if scenario_path is not None and scenario_path.exists():
+                pass
+            if output_path is not None and output_path.exists() and output_path.stat().st_size == 0:
+                output_path.unlink(missing_ok=True)
 
     del llm, tokenizer
     gc.collect()
     torch.cuda.empty_cache()
-    return generated
+
+    by_action: dict[str, list[dict]] = defaultdict(list)
+    for rec in generated:
+        by_action[str(rec.get("action_type", "vote")).lower()].append(rec)
+
+    if by_action.get("vote"):
+        vote_temp = Path(tempfile.NamedTemporaryFile(suffix=".jsonl", delete=False).name)
+        try:
+            with vote_temp.open("w", encoding="utf-8") as handle:
+                for rec in by_action["vote"]:
+                    handle.write(json.dumps(rec, ensure_ascii=False) + "\n")
+            assign_vote_rewards(str(vote_temp), output_path=str(vote_temp))
+            scored_votes = [json.loads(line) for line in vote_temp.read_text(encoding="utf-8").splitlines() if line.strip()]
+            by_action["vote"] = scored_votes
+        finally:
+            vote_temp.unlink(missing_ok=True)
+
+    if by_action.get("defense"):
+        evaluator = make_evaluator(
+            getattr(args, "judge_mode", "local"),
+            getattr(args, "judge_model", ""),
+            judge_gpu_memory_utilization,
+        )
+        assign_team_aware_rewards(by_action["defense"], output_path="", evaluator=evaluator)
+
+    combined = []
+    for action_type in ("vote", "defense"):
+        combined.extend(by_action.get(action_type, []))
+    debug_summary(combined, "generated_joint_rollouts")
+    return combined
 
 
 def build_joint_dataset(vote_path: Path | None = None, defense_path: Path | None = None, rows: list[dict] | None = None) -> list[JointSample]:
@@ -261,7 +335,10 @@ def build_joint_dataset(vote_path: Path | None = None, defense_path: Path | None
 
     scored_rows = score_joint_rollouts(rows)
     if not scored_rows:
+        print("[Debug] build_joint_dataset: no scored rows after reward assignment")
         return []
+
+    debug_summary(scored_rows, "dataset_before_normalization")
 
     by_action: dict[str, list[dict]] = defaultdict(list)
     for row in scored_rows:
@@ -290,9 +367,67 @@ def build_joint_dataset(vote_path: Path | None = None, defense_path: Path | None
             )
         )
 
+    print(f"[Debug] build_joint_dataset: final_samples={len(samples)}")
+    if samples:
+        reward_summary = {
+            "vote": [s.reward for s in samples if s.action_type.lower() == "vote"],
+            "defense": [s.reward for s in samples if s.action_type.lower() == "defense"],
+        }
+        for action_type, rewards in reward_summary.items():
+            if rewards:
+                print(
+                    f"[Debug] final_sample_rewards action={action_type}: "
+                    f"count={len(rewards)} mean={sum(rewards)/len(rewards):.4f} min={min(rewards):.4f} max={max(rewards):.4f}"
+                )
     return samples
 
 
+
+
+def _annotate_defense_row(
+    row: dict,
+    env,
+    evaluator=None,
+    judge_mode: str = "local",
+    judge_model: str = "",
+    gpu_memory_utilization: float = 0.6,
+) -> dict:
+    """Attach the metadata that the defense reward path expects.
+
+    The joint loop harvests the observation, but it still needs the same role and
+    judge metadata that the standalone defense loop produces before reward
+    assignment.
+    """
+    row = dict(row)
+    player_id = int(row.get("player_id", 0))
+    role_map = extract_roles(env)
+    if not role_map:
+        return row
+
+    all_player_ids = sorted(role_map.keys())
+    villager_ids = [pid for pid in all_player_ids if role_map[pid]["team"] == "Village"]
+    mafia_ids = [pid for pid in all_player_ids if role_map[pid]["team"] == "Mafia"]
+    player_team = role_map.get(player_id, {}).get("team", "Village")
+
+    row["player_team"] = player_team
+    row["all_player_ids"] = all_player_ids
+    row["villager_ids"] = villager_ids
+    row["mafia_ids"] = mafia_ids
+    row["judge_observation"] = judge_context(str(row.get("observation", "")), player_id)
+    row["judge_ids"] = select_judge_ids(player_id, villager_ids, max_judges=3)
+
+    if evaluator is None:
+        judge_util = min(float(gpu_memory_utilization), 0.35) if judge_mode == "local" else float(gpu_memory_utilization)
+        evaluator = make_evaluator(judge_mode, judge_model, judge_util)
+    row["suspicion_pre"] = evaluate_all_suspicions(
+        observation=str(row.get("observation", "")),
+        public_game_state=str(row.get("judge_observation", "")),
+        response=None,
+        judge_ids=row["judge_ids"],
+        all_player_ids=all_player_ids,
+        evaluator=evaluator,
+    )
+    return row
 
 
 def harvest_joint_observations(
@@ -301,58 +436,142 @@ def harvest_joint_observations(
     games_per_iter: int,
     situations_per_game: int,
     model_name: str | None = None,
+    artifact_root: str | Path | None = None,
+    judge_mode: str = "local",
+    judge_model: str = "",
+    gpu_memory_utilization: float = 0.6,
 ) -> list[dict]:
     """Harvest both vote and defense scenarios from live self-play games.
 
-    This is the online equivalent of the static vote/defense JSONL inputs and is
-    the default behavior for the merged loop. The function captures all relevant
-    observations from each game and randomly samples a bounded subset per game to
-    prevent early rounds from dominating the dataset.
+    If a model is provided, we use the real VLLM textarena agent so the game
+    actually progresses through voting and discussion phases. Without a model,
+    we fall back to a lightweight noop pass action for debugging only.
     """
+    artifact_root = Path(artifact_root) if artifact_root is not None else None
+    if artifact_root is not None:
+        (artifact_root / "observations").mkdir(parents=True, exist_ok=True)
+        (artifact_root / "completions").mkdir(parents=True, exist_ok=True)
+
+    judge_gpu_memory_utilization = (
+        min(float(gpu_memory_utilization), 0.35) if judge_mode == "local" else float(gpu_memory_utilization)
+    )
+    defense_evaluator = None
+
     harvested: list[dict] = []
-    for game_idx in range(games_per_iter):
-        env = ta.make(env_id=env_id)
-        env.reset(num_players=num_players)
+    llm = None
+    tokenizer = None
+    agents = None
 
-        captured_vote: list[dict] = []
-        captured_defense: list[dict] = []
-        done = False
-        turn_id = 0
-        while not done:
-            player_id, observation = env.get_observation()
-            phase = get_phase(env, observation)
+    if model_name is not None:
+        llm = LLM(
+            model=model_name,
+            tensor_parallel_size=1,
+            gpu_memory_utilization=gpu_memory_utilization,
+        )
+        tokenizer = AutoTokenizer.from_pretrained(model_name)
+        agents = {pid: VLLMTextArenaAgent(llm, tokenizer) for pid in range(num_players)}
 
-            if is_voting(phase):
-                captured_vote.append({
-                    "game_id": game_idx,
-                    "player_id": player_id,
-                    "turn_id": turn_id,
-                    "observation": observation,
-                    "action_type": "vote",
-                })
-            elif "discuss" in str(phase).lower():
-                captured_defense.append({
-                    "game_id": game_idx,
-                    "player_id": player_id,
-                    "turn_id": turn_id,
-                    "observation": observation,
-                    "action_type": "defense",
-                })
+    selected_vote_rows: list[dict] = []
+    selected_defense_rows: list[dict] = []
 
-            # The model is not used here for the current smoke-test implementation.
-            # The live-harvest path is intentionally lightweight and purely captures
-            # the state transitions needed to assemble the joint dataset.
-            if model_name is not None:
-                pass
-            done, _ = env.step(action="pass")
-            turn_id += 1
+    try:
+        for game_idx in range(games_per_iter):
+            env = ta.make(env_id=env_id)
+            env.reset(num_players=num_players)
 
-        selected_vote = random.sample(captured_vote, min(len(captured_vote), situations_per_game)) if captured_vote else []
-        selected_defense = random.sample(captured_defense, min(len(captured_defense), situations_per_game)) if captured_defense else []
+            captured_vote: list[dict] = []
+            captured_defense: list[dict] = []
+            done = False
+            turn_id = 0
+            while not done:
+                player_id, observation = env.get_observation()
+                phase = get_phase(env, observation)
 
-        harvested.extend(selected_vote)
-        harvested.extend(selected_defense)
+                if is_voting(phase):
+                    captured_vote.append({
+                        "game_id": game_idx,
+                        "player_id": player_id,
+                        "turn_id": turn_id,
+                        "observation": observation,
+                        "action_type": "vote",
+                    })
+                elif "discuss" in str(phase).lower():
+                    captured_defense.append({
+                        "game_id": game_idx,
+                        "player_id": player_id,
+                        "turn_id": turn_id,
+                        "observation": observation,
+                        "action_type": "defense",
+                    })
 
+                if agents is not None:
+                    action_out = agents[player_id](observation)
+                    done, _ = env.step(action=action_out["action"])
+                else:
+                    done, _ = env.step(action="pass")
+                turn_id += 1
+
+            selected_vote = random.sample(captured_vote, min(len(captured_vote), situations_per_game)) if captured_vote else []
+            selected_defense = list(captured_defense)
+            selected_defense = random.sample(selected_defense, min(len(selected_defense), situations_per_game)) if selected_defense else []
+
+            for row in selected_vote:
+                row["action_type"] = "vote"
+                if artifact_root is not None:
+                    scenario_path, _ = _resolve_artifact_paths(row, "vote", artifact_root)
+                    if scenario_path is not None:
+                        scenario_path.write_text(str(row.get("observation", "")), encoding="utf-8")
+                        row["scenario_path"] = str(scenario_path)
+            selected_vote_rows.extend(selected_vote)
+
+            for row in selected_defense:
+                row["action_type"] = "defense"
+                if artifact_root is not None:
+                    scenario_path, _ = _resolve_artifact_paths(row, "defense", artifact_root)
+                    if scenario_path is not None:
+                        scenario_path.write_text(str(row.get("observation", "")), encoding="utf-8")
+                        row["scenario_path"] = str(scenario_path)
+            selected_defense_rows.extend(selected_defense)
+
+        if llm is not None:
+            llm = None
+        if tokenizer is not None:
+            tokenizer = None
+        if agents is not None:
+            agents = None
+        gc.collect()
+        torch.cuda.empty_cache()
+
+        if selected_defense_rows:
+            if defense_evaluator is None and judge_mode == "local":
+                defense_evaluator = make_evaluator(judge_mode, judge_model, judge_gpu_memory_utilization)
+            annotated_defense = []
+            for row in selected_defense_rows:
+                annotated_defense.append(
+                    _annotate_defense_row(
+                        row,
+                        env,
+                        evaluator=defense_evaluator,
+                        judge_mode=judge_mode,
+                        judge_model=judge_model,
+                        gpu_memory_utilization=judge_gpu_memory_utilization,
+                    )
+                )
+            selected_defense_rows = annotated_defense
+
+        harvested.extend(selected_vote_rows)
+        harvested.extend(selected_defense_rows)
+    finally:
+        if llm is not None:
+            llm = None
+        if tokenizer is not None:
+            tokenizer = None
+        if agents is not None:
+            agents = None
+        gc.collect()
+        torch.cuda.empty_cache()
+
+    debug_summary(harvested, "harvested_joint_observations")
     return harvested
 
 
@@ -734,6 +953,9 @@ def main() -> None:
     parser.add_argument("--base-model", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Default actor model for training.")
     parser.add_argument("--old-policy-model", type=str, default="Qwen/Qwen2.5-7B-Instruct", help="Frozen model used to compute old-policy log-probs; defaults to the same Qwen2.5-7B base model.")
     parser.add_argument("--output-dir", type=Path, default=ROOT / "runs" / "joint_dynamic_grpo")
+    parser.add_argument("--artifacts-dir", type=Path, default=None, help="Directory for saved observation and completion JSONL artifacts; defaults to <output-dir>/artifacts.")
+    parser.add_argument("--judge-mode", choices=("local", "mock"), default="local")
+    parser.add_argument("--judge-model", default="Qwen/Qwen2.5-7B-Instruct", help="Local judge model path or HF id")
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--batch-size", type=int, default=2)
     parser.add_argument("--gradient-accumulation-steps", type=int, default=4)
@@ -755,12 +977,21 @@ def main() -> None:
     if not args.old_policy_model:
         args.old_policy_model = args.base_model
 
+    artifact_root = args.artifacts_dir if args.artifacts_dir is not None else (Path(args.output_dir) / "artifacts")
+    artifact_root.mkdir(parents=True, exist_ok=True)
+    print(f"[Artifacts] joint loop debug files will be written to {artifact_root}")
+
     if args.live_harvest:
         harvested_rows = harvest_joint_observations(
             env_id=args.env_id,
             num_players=args.num_players,
             games_per_iter=args.games_per_iter,
             situations_per_game=args.situations_per_game,
+            model_name=args.base_model,
+            artifact_root=artifact_root,
+            judge_mode=args.judge_mode,
+            judge_model=args.judge_model,
+            gpu_memory_utilization=args.gpu_memory_utilization,
         )
         rows = generate_joint_rollouts(
             model=args.base_model,
