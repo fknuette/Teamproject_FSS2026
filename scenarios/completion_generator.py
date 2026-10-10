@@ -38,7 +38,7 @@ if str(SRC) not in sys.path:
 from vllm import LLM, SamplingParams
 from transformers import AutoTokenizer
 
-from teamproject_fss2026.textarena_utils import build_agent_prompt, extract_phase
+from teamproject_fss2026.textarena_utils import build_agent_prompt, extract_phase, sft_stop_token_ids
 
 
 def generate_completions(
@@ -124,6 +124,7 @@ def generate_completions(
         temperature=temperature,
         top_p=top_p,
         max_tokens=max_tokens,
+        stop_token_ids=sft_stop_token_ids(tokenizer, model),
     )
     outputs = llm.generate([prompt_text], sampling)
     completions = [o.text for o in outputs[0].outputs]

@@ -72,7 +72,10 @@ class DynamicDefenseTests(unittest.TestCase):
         class Environment:
             def __init__(self):
                 self.turn = 0
-                self.state = types.SimpleNamespace(game_state={"phase": "Discuss"})
+                self.state = types.SimpleNamespace(game_state={
+                    "phase": "Action",
+                    "roles": {1: "Villager", 2: "Mafia", 3: "Villager"},
+                })
 
             def reset(self, num_players):
                 pass
@@ -82,6 +85,7 @@ class DynamicDefenseTests(unittest.TestCase):
 
             def step(self, action):
                 self.turn += 1
+                self.state.game_state["phase"] = "Discuss"
                 return self.turn == 2, {}
 
         fake_ta = types.ModuleType("textarena")

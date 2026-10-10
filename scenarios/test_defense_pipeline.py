@@ -43,21 +43,59 @@ class DefensePipelineTests(unittest.TestCase):
             from completion_generator import generate_completions
 
             class Tokenizer:
+                name_or_path = "other/model"
+
                 def apply_chat_template(self, messages, **kwargs):
                     return messages[1]["content"]
 
             class LLM:
                 def generate(self, prompts, sampling):
+                    self.sampling = sampling
                     texts = ["Ich erkläre den Wechsel: Neue Aussage von Spieler 3 änderte meine Einschätzung.", "Nein."]
                     return [types.SimpleNamespace(outputs=[types.SimpleNamespace(text=t) for t in texts])]
 
             with tempfile.TemporaryDirectory() as temp_dir:
                 scenarios = generate_observations(1, Path(temp_dir) / "observations", mock_local_llm_evaluator)
                 output = Path(temp_dir) / "completions.jsonl"
+                llm = LLM()
                 records = generate_completions(
                     str(scenarios[0]), "unused", num_completions=2, output=str(output),
-                    llm=LLM(), tokenizer=Tokenizer(),
+                    llm=llm, tokenizer=Tokenizer(),
                 )
+                self.assertIsNone(llm.sampling.kwargs["stop_token_ids"])
+
+                class SFTTokenizer(Tokenizer):
+                    name_or_path = "fknuette/werwolf-sft"
+                    eos_token_id = 10
+
+                    def convert_tokens_to_ids(self, token):
+                        return 20
+
+                    def convert_ids_to_tokens(self, token_id):
+                        return "<|im_end|>" if token_id == 20 else "<|endoftext|>"
+
+                sft_llm = LLM()
+                generate_completions(
+                    str(scenarios[0]), "fknuette/werwolf-sft", num_completions=2,
+                    output=str(Path(temp_dir) / "sft.jsonl"),
+                    llm=sft_llm, tokenizer=SFTTokenizer(),
+                )
+                self.assertEqual(sft_llm.sampling.kwargs["stop_token_ids"], [10, 20])
+
+                merged_llm = LLM()
+                merged_dir = Path(temp_dir) / "merged_model"
+                merged_dir.mkdir()
+                (merged_dir / "sft_origin.json").write_text(
+                    json.dumps({"base_model": "fknuette/werwolf-sft"}), encoding="utf-8"
+                )
+                merged_tokenizer = SFTTokenizer()
+                merged_tokenizer.name_or_path = str(merged_dir)
+                generate_completions(
+                    str(scenarios[0]), str(merged_dir), num_completions=2,
+                    output=str(Path(temp_dir) / "merged.jsonl"),
+                    llm=merged_llm, tokenizer=merged_tokenizer,
+                )
+                self.assertEqual(merged_llm.sampling.kwargs["stop_token_ids"], [10, 20])
                 original = json.loads(scenarios[0].read_text(encoding="utf-8"))
                 self.assertEqual(records[0]["observation"], original["observation"])
                 self.assertEqual(records[0]["verdacht_pre"], original["verdacht_pre"])
