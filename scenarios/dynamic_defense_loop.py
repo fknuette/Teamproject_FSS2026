@@ -313,7 +313,7 @@ def main() -> None:
     parser.add_argument("--situations-per-game", type=int, default=4)
     # --accusation-window removed: any discussion turn is now a valid scenario
     parser.add_argument("--num-completions", type=int, default=8)
-    parser.add_argument("--temperature", type=float, default=1.0)
+    parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=200)
     parser.add_argument("--gpu-memory-utilization", type=float, default=0.6)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
