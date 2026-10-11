@@ -216,7 +216,7 @@ def main() -> None:
                    help="Y: max voting situations randomly sampled from each game. "
                         "Keeps one game from dominating the dataset and caps completion cost.")
     p.add_argument("--num-completions", type=int, default=8)
-    p.add_argument("--temperature", type=float, default=1.0)
+    p.add_argument("--temperature", type=float, default=0.7)
     p.add_argument("--max-tokens", type=int, default=100)
     p.add_argument("--gpu-memory-utilization", type=float, default=0.6)
     p.add_argument("--tensor-parallel-size", type=int, default=1)
