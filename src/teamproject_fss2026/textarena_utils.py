@@ -1,13 +1,48 @@
 from __future__ import annotations
 from transformers import AutoTokenizer
+import json
 import re
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Literal
 from xmlrpc.client import boolean
 
 THINK_RE = re.compile(r"<think>(.*?)</think>", re.DOTALL | re.IGNORECASE)
 ACTION_RE = re.compile(r"<action>(.*?)</action>", re.DOTALL | re.IGNORECASE)
 BRACKET_ACTION_RE = re.compile(r"\[\d+\]")
+SFT_MODEL_ID = "fknuette/werwolf-sft"
+SFT_ORIGIN_FILE = "sft_origin.json"
+
+
+def is_sft_model(model: str, tokenizer=None) -> bool:
+    """Identify the original SFT model or a merged checkpoint derived from it."""
+    if model == SFT_MODEL_ID or getattr(tokenizer, "name_or_path", None) == SFT_MODEL_ID:
+        return True
+    origin_file = Path(model) / SFT_ORIGIN_FILE
+    if origin_file.is_file():
+        return json.loads(origin_file.read_text(encoding="utf-8")).get("base_model") == SFT_MODEL_ID
+    return False
+
+
+def sft_stop_token_ids(tokenizer, model: str) -> list[int] | None:
+    """Stop the werwolf SFT checkpoint at the end of its assistant turn."""
+    if not is_sft_model(model, tokenizer):
+        return None
+
+    im_end_id = tokenizer.convert_tokens_to_ids("<|im_end|>")
+    has_im_end = (
+        isinstance(im_end_id, int)
+        and im_end_id >= 0
+        and tokenizer.convert_ids_to_tokens(im_end_id) == "<|im_end|>"
+    )
+    stop_token_ids = {
+        token_id
+        for token_id in (tokenizer.eos_token_id, im_end_id if has_im_end else None)
+        if isinstance(token_id, int) and token_id >= 0
+    }
+    if not stop_token_ids:
+        raise ValueError("Tokenizer does not provide an EOS or <|im_end|> token")
+    return sorted(stop_token_ids)
 
 
 def extract_phase(observation:str) -> Literal["Discuss", "Voting", "Action"]:

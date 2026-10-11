@@ -6,6 +6,9 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from peft import LoraConfig, get_peft_model, PeftModel
 from pathlib import Path
+import json
+
+from teamproject_fss2026.textarena_utils import SFT_MODEL_ID, SFT_ORIGIN_FILE, is_sft_model
 
 
 def setup_model_with_lora(
@@ -165,5 +168,12 @@ def merge_lora_adapter(
     Path(merged_output_dir).mkdir(parents=True, exist_ok=True)
     model.save_pretrained(merged_output_dir)
     tokenizer.save_pretrained(merged_output_dir)
-    
+    origin_file = Path(merged_output_dir) / SFT_ORIGIN_FILE
+    if is_sft_model(base_model):
+        origin_file.write_text(
+            json.dumps({"base_model": SFT_MODEL_ID}) + "\n", encoding="utf-8"
+        )
+    else:
+        origin_file.unlink(missing_ok=True)
+
     print("[Merge] Done!")
