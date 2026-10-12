@@ -936,6 +936,25 @@ def setup_old_policy_model(model_name: str) -> AutoModelForCausalLM:
     return old_policy
 
 
+def merge_lora_for_vllm(base_model: str, adapter_dir: Path, merged_output_dir: Path) -> str:
+    """Merge a PEFT adapter into the underlying base model so vLLM can load it."""
+    from peft import PeftModel
+
+    merged_output_dir.mkdir(parents=True, exist_ok=True)
+    base = AutoModelForCausalLM.from_pretrained(
+        base_model,
+        torch_dtype=torch.bfloat16,
+        device_map="cpu",
+        trust_remote_code=True,
+    )
+    tokenizer = AutoTokenizer.from_pretrained(base_model, trust_remote_code=True)
+    merged = PeftModel.from_pretrained(base, str(adapter_dir))
+    merged = merged.merge_and_unload()
+    merged.save_pretrained(str(merged_output_dir))
+    tokenizer.save_pretrained(str(merged_output_dir))
+    return str(merged_output_dir)
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Mixed vote + defense GRPO training")
     parser.add_argument("--vote-data", type=Path, default=None, help="JSONL file produced by the dynamic vote loop")
@@ -945,6 +964,7 @@ def main() -> None:
     parser.add_argument("--num-players", type=int, default=8)
     parser.add_argument("--games-per-iter", type=int, default=2)
     parser.add_argument("--situations-per-game", type=int, default=2)
+    parser.add_argument("--loop-count", type=int, default=1, help="Repeat the mixed vote+defense training loop across fresh harvested batches.")
     parser.add_argument("--num-completions", type=int, default=4)
     parser.add_argument("--temperature", type=float, default=1.0)
     parser.add_argument("--max-tokens", type=int, default=128)
@@ -974,85 +994,101 @@ def main() -> None:
     parser.add_argument("--lora-dropout", type=float, default=0.05)
     args = parser.parse_args()
 
+    if args.loop_count < 1:
+        parser.error("--loop-count must be >= 1")
     if not args.old_policy_model:
         args.old_policy_model = args.base_model
 
-    artifact_root = args.artifacts_dir if args.artifacts_dir is not None else (Path(args.output_dir) / "artifacts")
-    artifact_root.mkdir(parents=True, exist_ok=True)
-    print(f"[Artifacts] joint loop debug files will be written to {artifact_root}")
+    base_model = args.base_model
+    output_root = Path(args.output_dir)
+    output_root.mkdir(parents=True, exist_ok=True)
 
-    if args.live_harvest:
-        harvested_rows = harvest_joint_observations(
-            env_id=args.env_id,
-            num_players=args.num_players,
-            games_per_iter=args.games_per_iter,
-            situations_per_game=args.situations_per_game,
-            model_name=args.base_model,
-            artifact_root=artifact_root,
-            judge_mode=args.judge_mode,
-            judge_model=args.judge_model,
-            gpu_memory_utilization=args.gpu_memory_utilization,
+    for iteration in range(1, args.loop_count + 1):
+        print(f"\n{'='*80}\n[Joint loop iteration {iteration}/{args.loop_count}] using model={base_model}\n{'='*80}")
+        artifact_root = Path(args.artifacts_dir) / f"iter_{iteration}" if args.artifacts_dir is not None else (output_root / f"iter_{iteration}" / "artifacts")
+        artifact_root.mkdir(parents=True, exist_ok=True)
+        print(f"[Artifacts] joint loop debug files will be written to {artifact_root}")
+
+        if args.live_harvest:
+            harvested_rows = harvest_joint_observations(
+                env_id=args.env_id,
+                num_players=args.num_players,
+                games_per_iter=args.games_per_iter,
+                situations_per_game=args.situations_per_game,
+                model_name=base_model,
+                artifact_root=artifact_root,
+                judge_mode=args.judge_mode,
+                judge_model=args.judge_model,
+                gpu_memory_utilization=args.gpu_memory_utilization,
+            )
+            rows = generate_joint_rollouts(
+                model=base_model,
+                rows=harvested_rows,
+                args=args,
+            )
+            samples = build_joint_dataset(rows=rows)
+        else:
+            if args.vote_data is None or args.defense_data is None:
+                raise ValueError("Either provide --vote-data and --defense-data or enable --live-harvest.")
+            samples = build_joint_dataset(vote_path=args.vote_data, defense_path=args.defense_data)
+
+        if not samples:
+            raise ValueError(f"No mixed vote+defense samples available for training in iteration {iteration}.")
+
+        policy_model, tokenizer = setup_model(
+            base_model,
+            lora_r=args.lora_r,
+            lora_alpha=args.lora_alpha,
+            lora_dropout=args.lora_dropout,
         )
-        rows = generate_joint_rollouts(
-            model=args.base_model,
-            rows=harvested_rows,
-            args=args,
+        old_policy_model = setup_old_policy_model(base_model)
+        ref_model = setup_reference_model(base_model)
+
+        dataset = JointTrainDataset(
+            samples,
+            tokenizer=tokenizer,
+            max_prompt_length=args.max_prompt_length,
+            max_completion_length=args.max_completion_length,
         )
-        samples = build_joint_dataset(rows=rows)
-    else:
-        if args.vote_data is None or args.defense_data is None:
-            raise ValueError("Either provide --vote-data and --defense-data or enable --live-harvest.")
-        samples = build_joint_dataset(vote_path=args.vote_data, defense_path=args.defense_data)
 
-    if not samples:
-        raise ValueError("No mixed vote+defense samples available for training.")
+        iter_output_dir = output_root / f"iter_{iteration}"
+        iter_output_dir.mkdir(parents=True, exist_ok=True)
+        trainer = JointGRPOTrainer(
+            policy_model=policy_model,
+            old_policy_model=old_policy_model,
+            ref_model=ref_model,
+            tokenizer=tokenizer,
+            train_dataset=dataset,
+            output_dir=str(iter_output_dir),
+            batch_size=args.batch_size,
+            epochs=args.epochs,
+            learning_rate=args.learning_rate,
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            logging_steps=args.logging_steps,
+            save_steps=args.save_steps,
+            lambda_vote=args.lambda_vote,
+            lambda_defense=args.lambda_defense,
+            clip_epsilon=args.clip_epsilon,
+            kl_coef=args.kl_coef,
+            bf16=args.bf16,
+        )
+        trainer.train()
 
-    policy_model, tokenizer = setup_model(
-        args.base_model,
-        lora_r=args.lora_r,
-        lora_alpha=args.lora_alpha,
-        lora_dropout=args.lora_dropout,
-    )
-    old_policy_model = setup_old_policy_model(args.old_policy_model)
-    ref_model = setup_reference_model(args.base_model)
+        adapter_dir = iter_output_dir / "final"
+        merged_dir = iter_output_dir / "merged_model"
+        if not adapter_dir.exists():
+            raise FileNotFoundError(f"Expected trained joint checkpoint at {adapter_dir}, but it was not created.")
+        base_model = merge_lora_for_vllm(base_model, adapter_dir, merged_dir)
 
-    dataset = JointTrainDataset(
-        samples,
-        tokenizer=tokenizer,
-        max_prompt_length=args.max_prompt_length,
-        max_completion_length=args.max_completion_length,
-    )
+        del trainer
+        del policy_model
+        del tokenizer
+        del old_policy_model
+        del ref_model
+        gc.collect()
+        torch.cuda.empty_cache()
 
-    trainer = JointGRPOTrainer(
-        policy_model=policy_model,
-        old_policy_model=old_policy_model,
-        ref_model=ref_model,
-        tokenizer=tokenizer,
-        train_dataset=dataset,
-        output_dir=str(args.output_dir),
-        batch_size=args.batch_size,
-        epochs=args.epochs,
-        learning_rate=args.learning_rate,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        logging_steps=args.logging_steps,
-        save_steps=args.save_steps,
-        lambda_vote=args.lambda_vote,
-        lambda_defense=args.lambda_defense,
-        clip_epsilon=args.clip_epsilon,
-        kl_coef=args.kl_coef,
-        bf16=args.bf16,
-    )
-    trainer.train()
-
-    del trainer
-    del policy_model
-    del tokenizer
-    del old_policy_model
-    del ref_model
-    gc.collect()
-    torch.cuda.empty_cache()
-
-    print("[Done] joint dynamic GRPO training finished.")
+    print(f"\n[Done] joint dynamic GRPO training finished after {args.loop_count} iterations.")
 
 
 if __name__ == "__main__":
