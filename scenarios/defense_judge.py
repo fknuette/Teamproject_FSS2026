@@ -114,16 +114,35 @@ def build_judge_system_prompt(observation: str, judge_id: int) -> str:
 
 
 def parse_multi_ratings(raw_output: str, expected_player_ids: list[int]) -> dict[int, int]:
-    """Parse all ``<vote_N>NUMBER</vote_N>`` tags.  Missing players fall back to 5."""
+    """Parse all ``<vote_N>NUMBER</vote_N>`` tags for the current game.
+
+    Judge outputs are only valid for players in the active scenario. Any extra or
+    malformed target IDs are ignored to avoid poisoning the aggregate suspicion
+    scores with players that were never part of the game.
+    """
+    allowed = set(int(pid) for pid in expected_player_ids)
     result: dict[int, int] = {}
+    seen_ids = set()
     for match in MULTI_VOTE_RE.finditer(raw_output):
         pid = int(match.group(1))
+        seen_ids.add(pid)
+        if pid not in allowed:
+            print(f"[WARNING] Judge returned unexpected player {pid}, ignoring rating. Raw output: {raw_output!r}")
+            continue
         score = max(1, min(10, int(match.group(2))))
         result[pid] = score
-    for pid in expected_player_ids:
-        if pid not in result:
-            print(f"[WARNING] Judge missing rating for player {pid}, fallback to 5")
+
+    # Identify any expected players missing from the parsed result and warn once.
+    missing = [pid for pid in sorted(expected_player_ids) if pid not in result]
+    if missing:
+        for pid in missing:
+            print(f"[WARNING] Judge missing rating for player {pid}, fallback to 5. Observed ratings: {sorted(seen_ids)}. Raw output: {raw_output!r}")
             result[pid] = 5
+
+        # Print the concise parsed tag mapping so the log near the fallback shows
+        # exactly which tags were extracted and their numeric values.
+        print(f"[DEBUG] Parsed tags: {result}")
+
     return result
 
 
@@ -146,10 +165,13 @@ def build_multi_judge_messages(
     user = f"Game State:\n{public_game_state}\n\n"
     if response is not None:
         user += f"New public statement from the speaking player:\n{response}\n\n"
+    # Strong, explicit instruction to reduce model omissions or reordering:
+    example_tags = "".join(f"<vote_{p}>5</vote_{p}>" for p in other_player_ids)
     user += (
-        f"Rate the suspicion level for each of the following players: [{player_list}]. "
-        "Output ONLY <vote_N>NUMBER</vote_N> tags, one per player. "
-        "Example: <vote_2>7</vote_2>"
+        f"Rate the suspicion level for each of the following players in THIS ORDER: [{player_list}].\n"
+        "IMPORTANT: Output EXACTLY one <vote_N>NUMBER</vote_N> tag for each player in that ORDER. "
+        "Use integers 1-10 only. No additional text or explanation.\n"
+        f"Example for this order: {example_tags}"
     )
     return [
         {"role": "system", "content": system},
@@ -171,13 +193,60 @@ def evaluate_all_suspicions(
     mapping player_id → mean suspicion across all judges that rated that player.
     """
     ratings: dict[int, list[int]] = {p: [] for p in all_player_ids}
+    max_attempts = 1
     for judge_id in judge_ids:
         other_ids = [p for p in all_player_ids if p != judge_id]
         msgs = build_multi_judge_messages(observation, public_game_state, response, judge_id, other_ids)
-        raw = evaluator(msgs, judge_id)
-        per_player = parse_multi_ratings(raw, other_ids)
+
+        per_player: dict[int, int] = {}
+        for attempt in range(1, max_attempts + 1):
+            raw = evaluator(msgs, judge_id)
+
+            # Quick scan: collect which expected player ids were actually present
+            found_ids = {int(m.group(1)) for m in MULTI_VOTE_RE.finditer(raw) if int(m.group(1)) in other_ids}
+
+            if len(found_ids) == len(other_ids):
+                # Clean parse into final per-player dict (includes fallbacks)
+                per_player = parse_multi_ratings(raw, other_ids)
+                break
+
+            # Not all expected tags were present. If we can retry, add a short
+            # reminder prompt asking the judge to output tags for all players.
+            print(
+                f"[WARNING] Judge output missing tags (attempt {attempt}/{max_attempts}) "
+                f"for judge {judge_id}. Observed: {sorted(found_ids)}. Raw: {raw!r}"
+            )
+
+            if attempt < max_attempts:
+                reminder = (
+                    "Reminder: Output EXACTLY one <vote_N>NUMBER</vote_N> tag for each player in the "
+                    f"following list: {other_ids}. Use integers 1-10 only and no other text."
+                )
+                retry_msgs = list(msgs) + [{"role": "user", "content": reminder}]
+                msgs = retry_msgs
+                continue
+
+            # Final attempt: accept whatever we have (parse will fallback to 5s)
+            per_player = parse_multi_ratings(raw, other_ids)
+
+            # Log full outgoing messages to help debug why tags were missing.
+            print("[DEBUG] Final judge messages sent to LLM (system + user roles):")
+            try:
+                for m in msgs:
+                    role = m.get("role", "<no-role>")
+                    content = m.get("content", "")
+                    print(f"[DEBUG] ROLE={role} CONTENT={content!r}")
+            except Exception:
+                print("[DEBUG] Could not stringify outgoing messages")
+            print(f"[DEBUG] Expected player list: {other_ids}")
+
+        # Aggregate into ratings map
         for pid, score in per_player.items():
+            if pid not in ratings:
+                print(f"[WARNING] Creating rating bucket for unexpected player {pid} using default list")
+                ratings[pid] = []
             ratings[pid].append(score)
+
     return {p: mean(r) if r else 5.0 for p, r in ratings.items()}
 
 
