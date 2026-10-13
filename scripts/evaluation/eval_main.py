@@ -17,6 +17,7 @@ from matchmaker import RandomMatchmaker
 from result_analyzer import evaluate_simple_matchmaking_winrate, evaluate_trueskill_eval_winrate
 from run_eval_games import run_eval_games
 from trueskill_rater import update_ratings_from_results
+from lora_chain_merger import build_merged_models_for_window, cleanup_created_merged_models
 
 
 def main() -> None:
@@ -110,6 +111,16 @@ def main() -> None:
         type=int,
         default=1,
         help="When --full is used, evaluate only every N discovered checkpoints. Example: 3 means iterate 1, 4, 7, ...",
+    )
+    parser.add_argument(
+        "--lora-chain-merge",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help=(
+            "Rebuild merged_model on demand by chaining LoRA adapters. "
+            "Enables evaluation of checkpoints whose merged_model was pruned. "
+            "On-demand merged models are deleted after they leave the eval window."
+        ),
     )
 
     args = parser.parse_args()
@@ -246,28 +257,91 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
         registry.save()
         print(f"Registered baseline: {args.baseline_checkpoint}")
 
+    lora_chain_merge: bool = getattr(args, "lora_chain_merge", False)
+    checkpoint_dir = Path(args.checkpoint_dir)
+    window_size = max(0, int(getattr(args, "eval_window_size", 1)))
+
     if args.full:
-        discovered = _discover_checkpoints(Path(args.checkpoint_dir))
+        discovered = _discover_checkpoints(checkpoint_dir)
         freq = max(1, int(getattr(args, "eval_frequency", 1)))
         selected = discovered[::freq]
         print(f"Full TrueSkill evaluation frequency: every {freq} checkpoint(s)")
         print(f"Evaluating checkpoints: {[ckpt_id for ckpt_id, _ in selected]}")
 
-        for ckpt_id, ckpt_path in selected:
+        all_created: set[str] = set()
+
+        for i, (ckpt_id, ckpt_path) in enumerate(selected):
             if ckpt_id in registry.all_ids():
                 continue
+
+            current_window = (
+                set(_select_recent_window(discovered, window_size=window_size, eval_checkpoint=ckpt_id))
+                | {args.baseline_checkpoint}
+            )
+
+            if lora_chain_merge:
+                newly_created = build_merged_models_for_window(
+                    checkpoint_dir=checkpoint_dir,
+                    baseline_model=args.baseline_checkpoint,
+                    window_checkpoint_ids=current_window,
+                    all_discovered=discovered,
+                )
+                all_created |= newly_created
+
             run_single_eval_game(
                 ckpt_id,
                 args,
                 registry,
                 output_dir,
-                recent_window=set(_select_recent_window(discovered, window_size=max(0, int(getattr(args, "eval_window_size", 1))), eval_checkpoint=ckpt_id)) | {args.baseline_checkpoint},
+                recent_window=current_window,
             )
 
+            if lora_chain_merge:
+                # Determine which IDs will be in the NEXT checkpoint's window
+                # so we know what to keep.
+                next_idx = i + 1
+                while next_idx < len(selected) and selected[next_idx][0] in registry.all_ids():
+                    next_idx += 1
+                if next_idx < len(selected):
+                    next_ckpt_id = selected[next_idx][0]
+                    next_window = (
+                        set(_select_recent_window(discovered, window_size=window_size, eval_checkpoint=next_ckpt_id))
+                        | {args.baseline_checkpoint}
+                    )
+                else:
+                    next_window = set()
+
+                cleanup_created_merged_models(
+                    checkpoint_dir=checkpoint_dir,
+                    created_ids=all_created,
+                    keep_window=next_window,
+                )
+                all_created -= all_created - next_window
+
     else:
-        window_size = max(0, int(getattr(args, "eval_window_size", 1)))
-        recent_window = set(_select_recent_window(_discover_checkpoints(Path(args.checkpoint_dir)), window_size=window_size, eval_checkpoint=args.eval_checkpoint))
-        run_single_eval_game(args.eval_checkpoint, args, registry, output_dir, recent_window=recent_window | {args.baseline_checkpoint})
+        discovered = _discover_checkpoints(checkpoint_dir)
+        recent_window = (
+            set(_select_recent_window(discovered, window_size=window_size, eval_checkpoint=args.eval_checkpoint))
+            | {args.baseline_checkpoint}
+        )
+
+        if lora_chain_merge:
+            newly_created = build_merged_models_for_window(
+                checkpoint_dir=checkpoint_dir,
+                baseline_model=args.baseline_checkpoint,
+                window_checkpoint_ids=recent_window,
+                all_discovered=discovered,
+            )
+
+        run_single_eval_game(args.eval_checkpoint, args, registry, output_dir, recent_window=recent_window)
+
+        if lora_chain_merge:
+            # Single-shot run: delete all on-demand merged models after eval.
+            cleanup_created_merged_models(
+                checkpoint_dir=checkpoint_dir,
+                created_ids=newly_created,
+                keep_window=set(),
+            )
 
 
 def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path, recent_window: set[str] | None = None):
