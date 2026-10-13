@@ -309,7 +309,7 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
                         | {args.baseline_checkpoint}
                     )
                 else:
-                    next_window = set()
+                    next_window = current_window
 
                 cleanup_created_merged_models(
                     checkpoint_dir=checkpoint_dir,
