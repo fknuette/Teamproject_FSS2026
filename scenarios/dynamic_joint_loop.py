@@ -251,6 +251,7 @@ def harvest_and_generate_joint(
     finally:
         del agents, llm, tokenizer
         gc.collect()
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
     return vote_entries, defense_entries, vote_files, defense_files
@@ -313,6 +314,7 @@ def score_defense_completions(
     finally:
         del evaluator
         gc.collect()
+        torch.cuda.synchronize()
         torch.cuda.empty_cache()
 
 
@@ -351,7 +353,7 @@ def main() -> None:
     parser.add_argument("--num-completions", type=int, default=8)
     parser.add_argument("--temperature", type=float, default=0.7)
     parser.add_argument("--max-tokens", type=int, default=200)
-    parser.add_argument("--gpu-memory-utilization", type=float, default=0.6)
+    parser.add_argument("--gpu-memory-utilization", type=float, default=0.4)
     parser.add_argument("--tensor-parallel-size", type=int, default=1)
     parser.add_argument("--lambda-vote", type=float, default=1.0,
                         help="Loss weight for voting objective.")
