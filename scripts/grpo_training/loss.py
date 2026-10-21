@@ -31,25 +31,25 @@ def compute_log_probs_per_token(
             attention_mask=attention_mask,
         )
         logits = outputs.logits  # [batch_size, seq_len, vocab_size]
-    
-    # Shift for next-token prediction
-    # logits[:, :-1, :] predicts labels[:, 1:]
-    shift_logits = logits[:, :-1, :].contiguous()
-    shift_labels = labels[:, 1:].contiguous()
-    
-    # Compute log softmax
-    log_probs = F.log_softmax(shift_logits, dim=-1)
-    
-    # Gather log probs for actual tokens
-    token_log_probs = log_probs.gather(
-        dim=-1,
-        index=shift_labels.unsqueeze(-1).clamp(min=0)
-    ).squeeze(-1)
-    
-    # Mask out prompt tokens (where labels == -100)
+
+        # Shift for next-token prediction: logits[:, :-1] predicts labels[:, 1:]
+        shift_logits = logits[:, :-1, :].contiguous()
+        del logits  # free [batch, seq, vocab] before log_softmax allocates another
+        shift_labels = labels[:, 1:].contiguous()
+
+        # log_softmax kept inside autocast: stays bfloat16, halves peak memory vs float32
+        log_probs = F.log_softmax(shift_logits, dim=-1)
+        del shift_logits
+
+        token_log_probs = log_probs.gather(
+            dim=-1,
+            index=shift_labels.unsqueeze(-1).clamp(min=0)
+        ).squeeze(-1)
+        del log_probs
+
     mask = (shift_labels != -100).float()
     token_log_probs = token_log_probs * mask
-    
+
     return token_log_probs, mask
 
 
