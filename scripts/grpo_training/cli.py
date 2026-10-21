@@ -30,24 +30,20 @@ def run_training(args: argparse.Namespace) -> None:
     Can be called from online_grpo_loop.py or directly via CLI.
     """
     
-    # Determine old policy model path (fall back to args.model if not specified)
     old_policy_model_path = args.old_policy_model if args.old_policy_model else args.model
-    
-    #Setup policy model with LoRA
+    ref_path = getattr(args, "reference_model", args.model)
+
     policy_model, tokenizer = setup_model_with_lora(
         model_name=args.model,
         lora_r=args.lora_r,
         lora_alpha=args.lora_alpha,
         lora_dropout=args.lora_dropout,
     )
-    
-    # Setup frozen old policy model (generated the rollout data)
     old_policy_model = setup_old_policy_model(old_policy_model_path)
-    
-    # Setup frozen reference model for KL regularization
-    ref_model = setup_reference_model(
-        getattr(args, "reference_model", args.model)
-    )
+    if ref_path == old_policy_model_path:
+        ref_model = old_policy_model
+    else:
+        ref_model = setup_reference_model(ref_path)
     
     # Reuse tokenizer from policy model setup
     if tokenizer.pad_token is None:
@@ -119,6 +115,7 @@ def run_joint_training(args: argparse.Namespace) -> None:
         args.lambda_defense float loss weight for defense
     """
     old_policy_path = args.old_policy_model if args.old_policy_model else args.model
+    ref_path = getattr(args, "reference_model", args.model)
 
     policy_model, tokenizer = setup_model_with_lora(
         model_name=args.model,
@@ -127,7 +124,12 @@ def run_joint_training(args: argparse.Namespace) -> None:
         lora_dropout=args.lora_dropout,
     )
     old_policy_model = setup_old_policy_model(old_policy_path)
-    ref_model = setup_reference_model(getattr(args, "reference_model", args.model))
+    # When old_policy and ref point to the same checkpoint, share the object
+    # instead of loading a second full model copy (~14 GB saved on 7B bf16).
+    if ref_path == old_policy_path:
+        ref_model = old_policy_model
+    else:
+        ref_model = setup_reference_model(ref_path)
 
     if tokenizer.pad_token is None:
         tokenizer.pad_token = tokenizer.eos_token
