@@ -212,6 +212,7 @@ def run_joint_training(args: argparse.Namespace) -> None:
                 did_step = True
 
             if defense_cycle is not None:
+                torch.cuda.empty_cache()
                 d_batch = next(defense_cycle)
                 d_loss, d_metrics = grpo_loss(
                     policy_model=policy_model,
