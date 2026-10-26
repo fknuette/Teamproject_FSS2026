@@ -187,9 +187,10 @@ def run_joint_training(args: argparse.Namespace) -> None:
         defense_cycle = itertools.cycle(defense_loader) if defense_loader else None
 
         for step in range(n_steps_per_epoch):
-            total_loss = None
+            did_step = False
             vote_loss_val = 0.0
             defense_loss_val = 0.0
+            joint_loss_val = 0.0
 
             if vote_cycle is not None:
                 v_batch = next(vote_cycle)
@@ -204,8 +205,11 @@ def run_joint_training(args: argparse.Namespace) -> None:
                     clip_epsilon=clip_epsilon,
                     kl_coef=kl_coef,
                 )
-                total_loss = lambda_vote * v_loss
+                # Backward immediately so vote activations are freed before defense forward pass.
+                (lambda_vote * v_loss / grad_accum).backward()
                 vote_loss_val = v_metrics["total_loss"]
+                joint_loss_val += lambda_vote * v_loss.item()
+                did_step = True
 
             if defense_cycle is not None:
                 d_batch = next(defense_cycle)
@@ -220,13 +224,13 @@ def run_joint_training(args: argparse.Namespace) -> None:
                     clip_epsilon=clip_epsilon,
                     kl_coef=kl_coef,
                 )
-                total_loss = lambda_defense * d_loss if total_loss is None else total_loss + lambda_defense * d_loss
+                (lambda_defense * d_loss / grad_accum).backward()
                 defense_loss_val = d_metrics["total_loss"]
+                joint_loss_val += lambda_defense * d_loss.item()
+                did_step = True
 
-            if total_loss is None:
+            if not did_step:
                 continue
-
-            (total_loss / grad_accum).backward()
 
             if (step + 1) % grad_accum == 0:
                 torch.nn.utils.clip_grad_norm_(policy_model.parameters(), 1.0)
@@ -237,7 +241,7 @@ def run_joint_training(args: argparse.Namespace) -> None:
                 if global_step % args.logging_steps == 0:
                     print(
                         f"[JointTraining] epoch={epoch + 1} step={global_step} "
-                        f"joint_loss={total_loss.item():.4f} "
+                        f"joint_loss={joint_loss_val:.4f} "
                         f"vote={vote_loss_val:.4f} defense={defense_loss_val:.4f}"
                     )
 
