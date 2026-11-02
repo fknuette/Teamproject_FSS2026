@@ -83,8 +83,12 @@ def main() -> None:
     parser.add_argument(
         "--reset-registry",
         action=argparse.BooleanOptionalAction,
-        default=True,
-        help="Delete the existing registry before the run starts. Default is True; use --no-reset-registry to keep it.",
+        default=None,
+        help=(
+            "Delete the existing registry before the run starts. Default is True for local iter_* "
+            "checkpoints and False for HF/external eval models (which are rated against the existing "
+            "registry); use --reset-registry / --no-reset-registry to override."
+        ),
     )
     parser.add_argument(
         "--min-games-per-team-role",
@@ -107,7 +111,11 @@ def main() -> None:
         "--eval-window-size",
         type=int,
         default=1,
-        help="Recent-model window size for evaluation. This counts previous checkpoints beyond the current one; the base model is always included.",
+        help=(
+            "Recent-model window size for evaluation. This counts previous checkpoints beyond the current one; "
+            "the base model is always included. For HF/external eval models the window is filled with the "
+            "most recently registered models in the registry."
+        ),
     )
     parser.add_argument(
         "--eval-frequency",
@@ -138,6 +146,19 @@ def main() -> None:
             )
         args.eval_checkpoint = discovered[-1][0]
         print(f"Auto-selected eval checkpoint: {discovered[-1][0]} ({args.eval_checkpoint})")
+
+    if (
+        args.mode == "trueskill"
+        and args.full
+        and _is_remote_model_id(Path(args.checkpoint_dir), args.eval_checkpoint)
+    ):
+        raise SystemExit(
+            "--full only supports local iter_* checkpoints; "
+            f"{args.eval_checkpoint!r} is a HuggingFace/external model. Run without --full."
+        )
+
+    if args.reset_registry is None:
+        args.reset_registry = not _is_remote_model_id(Path(args.checkpoint_dir), args.eval_checkpoint)
 
     # Resolve output directory based on mode if not explicitly provided
     if args.output_dir is None:
@@ -201,6 +222,14 @@ def _resolve_checkpoint_path(checkpoint_dir: Path, checkpoint_id: str) -> Path |
     print(f"No merged model found; using LoRA checkpoint: {lora_checkpoint}")
     return lora_checkpoint
 
+def _is_local_checkpoint_id(checkpoint_dir: Path, checkpoint_id: str) -> bool:
+    """True if the id is an iter dir under checkpoint_dir or an existing local directory."""
+    return (Path(checkpoint_dir) / checkpoint_id).is_dir() or Path(checkpoint_id).is_dir()
+
+
+def _is_remote_model_id(checkpoint_dir: Path, checkpoint_id: str) -> bool:
+    """True if the id/path is not a local checkpoint and so must be a HuggingFace hub id."""
+    return not _is_local_checkpoint_id(checkpoint_dir, checkpoint_id)
 
 def _discover_checkpoints(checkpoint_dir: Path) -> list[tuple[str, str]]:
     """Return (checkpoint_id, preferred model path) pairs for usable iter_* dirs."""
@@ -249,6 +278,40 @@ def _select_recent_window(discovered: list[tuple[str, str]], *, window_size: int
     if len(all_ids) <= window_size + 1:
         return all_ids
     return all_ids[-(window_size + 1):]
+
+
+def _is_usable_opponent(registry: CheckpointRegistry, checkpoint_dir: Path, ckpt_id: str) -> bool:
+    """A registry entry can be an opponent if it has a merged_model on disk or is a HF id."""
+    registered_path = registry.get(ckpt_id).path
+    if (checkpoint_dir / ckpt_id / "merged_model").is_dir():
+        return True
+    entry_path = Path(registered_path)
+    if entry_path.is_dir() and entry_path.name == "merged_model":
+        return True
+    return _is_remote_model_id(checkpoint_dir, registered_path)
+
+
+def _select_registry_window(
+    registry: CheckpointRegistry,
+    checkpoint_dir: Path,
+    *,
+    eval_checkpoint: str,
+    baseline_checkpoint: str,
+    window_size: int,
+) -> set[str]:
+    """Window for an eval model outside the iter_* sequence (e.g. HF).
+
+    Contains the eval model, the baseline and the `window_size` most recently
+    registered usable models (registry insertion order, not iter number).
+    """
+    candidates = [
+        ckpt_id
+        for ckpt_id in registry.all_ids()
+        if ckpt_id not in (eval_checkpoint, baseline_checkpoint)
+        and _is_usable_opponent(registry, checkpoint_dir, ckpt_id)
+    ]
+    newest = candidates[len(candidates) - window_size:] if window_size > 0 else []
+    return set(newest) | {eval_checkpoint, baseline_checkpoint}
 
 
 def _run_trueskill_mode(args, output_dir: Path) -> None:
@@ -330,10 +393,22 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
 
     else:
         discovered = _discover_checkpoints(checkpoint_dir)
-        recent_window = (
-            set(_select_recent_window(discovered, window_size=window_size, eval_checkpoint=args.eval_checkpoint))
-            | {args.baseline_checkpoint}
-        )
+        eval_is_discovered = any(ckpt_id == args.eval_checkpoint for ckpt_id, _ in discovered)
+        if eval_is_discovered:
+            recent_window = (
+                set(_select_recent_window(discovered, window_size=window_size, eval_checkpoint=args.eval_checkpoint))
+                | {args.baseline_checkpoint}
+            )
+        else:
+            # External/HF model: eval + baseline + most recently registered models.
+            recent_window = _select_registry_window(
+                registry,
+                checkpoint_dir,
+                eval_checkpoint=args.eval_checkpoint,
+                baseline_checkpoint=args.baseline_checkpoint,
+                window_size=window_size,
+            )
+            lora_chain_merge = False
 
         if lora_chain_merge:
             newly_created = build_merged_models_for_window(
@@ -363,37 +438,18 @@ def run_single_eval_game(eval_checkpoint, args, registry, output_dir: Path, rece
         print(f"Discovered and registered checkpoint: {eval_checkpoint}")
         registry.save()
 
-    # Compute available checkpoints (registered and present on disk).
-    # Require that an iteration has a `merged_model` directory to be considered
-    # available. Treat remote/baseline model ids (e.g. 'Qwen/...') as available.
-    available: list[str] = []
-    for ckpt_id in registry.all_ids():
-        if recent_window is not None and ckpt_id not in recent_window:
-            continue
+    # Opponent candidates: registered, usable, and (if given) inside the window.
+    available: list[str] = [
+        ckpt_id
+        for ckpt_id in registry.all_ids()
+        if (recent_window is None or ckpt_id in recent_window)
+        and _is_usable_opponent(registry, Path(args.checkpoint_dir), ckpt_id)
+    ]
 
-        entry_path = Path(registry.get(ckpt_id).path)
+    if eval_checkpoint not in available:
+        available.append(eval_checkpoint)
 
-        # 1) Standard location under --checkpoint-dir: <checkpoint_dir>/iter_X/merged_model
-        merged_standard = Path(args.checkpoint_dir) / ckpt_id / "merged_model"
-        if merged_standard.is_dir():
-            available.append(ckpt_id)
-            continue
-
-        # 2) Registered path explicitly points to a merged_model dir
-        if entry_path.is_dir() and entry_path.name == "merged_model":
-            available.append(ckpt_id)
-            continue
-
-        # 3) Remote/baseline model ids (e.g., 'Qwen/Qwen2.5-7B-Instruct') - keep available
-        # Heuristic: contains a slash and is not inside the local checkpoint dir
-        reg_path_str = registry.get(ckpt_id).path
-        if "/" in reg_path_str and not str(Path(reg_path_str)).startswith(str(Path(args.checkpoint_dir))):
-            available.append(ckpt_id)
-            continue
-
-        # Otherwise not available (e.g., iter_X exists but no merged_model inside)
-
-    if recent_window is not None and not available:
+    if recent_window is not None and len(available) < 2:
         available = [args.baseline_checkpoint, eval_checkpoint]
 
     matchmaker = RandomMatchmaker(
