@@ -33,7 +33,10 @@ def main() -> None:
         "--eval-checkpoint",
         type=str,
         default=None,
-        help="Checkpoint to evaluate (trueskill mode: defaults to latest iter_* in --checkpoint-dir)",
+        help=(
+            "Checkpoint to evaluate: an iter_* id in --checkpoint-dir, a local model directory, or a "
+            "HuggingFace model id (defaults to latest iter_* in --checkpoint-dir)"
+        ),
     )
     parser.add_argument(
         "--baseline-checkpoint",
@@ -86,8 +89,8 @@ def main() -> None:
     parser.add_argument(
         "--min-games-per-team-role",
         type=int,
-        default=3,
-        help="Minimum games where eval plays as Mafia and as Village (trueskill mode)",
+        default=20,
+        help="Games where eval plays as Mafia and as Village (minimum in trueskill mode, exact count in simple mode)",
     )
     parser.add_argument(
         "--register-checkpoint",
@@ -152,6 +155,8 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     """Run evaluation in simple mode (eval vs fixed baseline)."""
     matchmaker = SimplePairMatchmaker(
         baseline_checkpoint=args.baseline_checkpoint,
+        num_games_eval_mafia=args.min_games_per_team_role,
+        num_games_eval_villager=args.min_games_per_team_role,
     )
     checkpoint_path = _resolve_checkpoint_path(
         Path(args.checkpoint_dir), args.eval_checkpoint
@@ -179,8 +184,13 @@ def _run_simple_mode(args, output_dir: Path) -> None:
     print("Evaluation complete!")
 
 
-def _resolve_checkpoint_path(checkpoint_dir: Path, checkpoint_id: str) -> Path:
-    """Prefer a merged model and otherwise return the existing LoRA checkpoint."""
+def _resolve_checkpoint_path(checkpoint_dir: Path, checkpoint_id: str) -> Path | str:
+    """Return a HF id unchanged, an existing local dir as-is, or the iter_* model path."""
+    if not (Path(checkpoint_dir) / checkpoint_id).is_dir():
+        if Path(checkpoint_id).is_dir():
+            return Path(checkpoint_id)
+        return checkpoint_id
+
     iter_dir = checkpoint_dir / checkpoint_id
     merged_model = iter_dir / "merged_model"
     if merged_model.is_dir():
