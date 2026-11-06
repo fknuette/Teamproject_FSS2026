@@ -165,6 +165,146 @@ uv run python scripts/grpo_training/cli.py
 
 derzeit kein Training. Für einen vollständigen Lauf sollte `scripts/online_grpo_loop.py` verwendet werden.
 
+## Dynamische Szenario-Loops in `scenarios/`
+
+Die Ordner- und Lauflogik unter `scenarios/` ist der eigentliche "Live-Scenario"-Pfad für dynamische Selbstspiel-Training. Hier werden Rollen, Abstimmungs- und Verteidigungs-Situationen aus echten Spielen geerntet, mit Completionen bewertet und anschließend per GRPO trainiert. Das sind die wichtigsten Einstiegspunkte:
+
+1. `scenarios/dynamic_vote_loop.py`: Nur Abstimmungs-Szenarien aus live Self-Play
+2. `scenarios/dynamic_defense_loop.py`: Nur Verteidigungs-/Diskussions-Szenarien mit Judging
+3. `scenarios/dynamic_joint_loop.py`: Gemeinsamer Loop für Vote + Defense mit kombiniertem Loss
+
+Diese Loops werden normalerweise aus dem Projektstamm gestartet, nicht über die Root-CLI in `scripts/`.
+
+### 1) Dynamischer Vote-Loop
+
+```bash
+uv run python scenarios/dynamic_vote_loop.py \
+  --env-id SecretMafia-v0 \
+  --num-players 8 \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --work-dir scenarios/runs/dynamic_vote_loop \
+  --tmp-obs-dir scenarios/tmp_observation_vote \
+  --completions-dir scenarios/completions_vote_dynamic \
+  --loop-count 4 \
+  --games-per-iter 5 \
+  --situations-per-game 4 \
+  --num-completions 8 \
+  --temperature 0.7 \
+  --max-tokens 100 \
+  --gpu-memory-utilization 0.6 \
+  --tensor-parallel-size 1 \
+  --epochs 1 \
+  --batch-size 2 \
+  --gradient-accumulation-steps 4 \
+  --learning-rate 1e-5 \
+  --max-prompt-length 1024 \
+  --max-completion-length 256 \
+  --bf16
+```
+
+Der Loop sammelt pro Iteration frische Abstimmungsbeobachtungen aus mehreren kompletten Spielen, erzeugt für jede Situation mehrere Completionen, bewertet die Self-Vote-Rewards und trainiert nur auf den neu geernteten Daten. Die Checkpoints landen unter:
+
+```text
+scenarios/runs/dynamic_vote_loop/
+├── data/
+├── checkpoints/
+├── tmp_observation_vote/
+└── completions_vote_dynamic/
+```
+
+### 2) Dynamischer Defense-Loop
+
+```bash
+uv run python scenarios/dynamic_defense_loop.py \
+  --env-id SecretMafia-v0 \
+  --num-players 8 \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --judge-mode local \
+  --judge-model Qwen/Qwen2.5-7B-Instruct \
+  --work-dir scenarios/runs/dynamic_defense_loop \
+  --completions-dir scenarios/completions_defense_dynamic \
+  --loop-count 4 \
+  --games-per-iter 5 \
+  --situations-per-game 4 \
+  --num-completions 8 \
+  --temperature 0.7 \
+  --max-tokens 200 \
+  --gpu-memory-utilization 0.6 \
+  --tensor-parallel-size 1 \
+  --epochs 1 \
+  --batch-size 2 \
+  --gradient-accumulation-steps 4 \
+  --learning-rate 1e-5 \
+  --max-prompt-length 1024 \
+  --max-completion-length 256 \
+  --bf16
+```
+
+Dieser Loop sammelt Diskussions-/Verteidigungs-Situationen aus Self-Play, lässt drei andere Villager-Urteile (oder einen Mock-Judge) über die Suspicion vor und nach jeder Completion laufen und berechnet dann team-aware Rewards. Das ist der passende Loop, wenn man speziell auf defensive Spielzüge trainieren will.
+
+Wichtige Ausgabepfade:
+
+```text
+scenarios/runs/dynamic_defense_loop/
+├── raw_observations/
+├── observations/
+├── data/
+├── checkpoints/
+└── completions_defense_dynamic/
+```
+
+### 3) Dynamischer Joint-Loop (Vote + Defense)
+
+```bash
+uv run python scenarios/dynamic_joint_loop.py \
+  --env-id SecretMafia-v0 \
+  --num-players 8 \
+  --base-model Qwen/Qwen2.5-7B-Instruct \
+  --judge-mode local \
+  --judge-model Qwen/Qwen2.5-7B-Instruct \
+  --work-dir scenarios/runs/dynamic_joint_loop \
+  --loop-count 4 \
+  --games-per-iter 5 \
+  --situations-per-game 4 \
+  --num-completions 8 \
+  --temperature 0.7 \
+  --max-tokens 200 \
+  --gpu-memory-utilization 0.6 \
+  --tensor-parallel-size 1 \
+  --lambda-vote 1.0 \
+  --lambda-defense 1.0 \
+  --epochs 1 \
+  --batch-size 2 \
+  --gradient-accumulation-steps 4 \
+  --learning-rate 1e-5 \
+  --max-prompt-length 1024 \
+  --max-completion-length 256 \
+  --bf16
+```
+
+Das ist der vollständigste Szenario-Loop: In jeder Iteration werden gleichzeitig Abstimmungs- und Verteidigungs-Situation aus denselben Spielen geerntet, beide werden unabhängig bewertet und der gemeinsame GRPO-Loss berücksichtigt beide Ziele in einem Trainingsschritt.
+
+Typische Ausgabeverzeichnisse:
+
+```text
+scenarios/runs/dynamic_joint_loop/
+├── raw_vote/
+├── raw_defense/
+├── completions_vote/
+├── completions_defense/
+├── data/
+├── checkpoints/
+└── logs/
+```
+
+### Wann welche Datei verwenden?
+
+- `dynamic_vote_loop.py`: nur für Abstimmungs-/Votingsituationen
+- `dynamic_defense_loop.py`: nur für Diskussions-/Verteidigungsantworten und Suspicion-Scoring
+- `dynamic_joint_loop.py`: für die komplette, gemischte Strategie mit Vote + Defense
+
+Die Loop-Parameter `--games-per-iter`, `--situations-per-game` und `--num-completions` steuern den Umfang der Ernte und die Kosten pro Iteration. Mehr Spiele und mehr Situationen erhöhen die Datenvielfalt, aber auch die Laufzeit und den GPU-Aufwand.
+
 ## Relevante Projektdateien
 
 - `scripts/argument_parser.py`: zentrale CLI-Argumente und Standardwerte
@@ -173,6 +313,9 @@ derzeit kein Training. Für einen vollständigen Lauf sollte `scripts/online_grp
 - `scripts/grpo_training/`: Dataset, Modelle, Loss und GRPO-Training
 - `scripts/evaluation/`: einfache und TrueSkill-basierte Evaluation
 - `src/teamproject_fss2026/textarena_utils.py`: TextArena-Hilfsfunktionen
+- `scenarios/dynamic_vote_loop.py`: dynamischer Vote-Loop
+- `scenarios/dynamic_defense_loop.py`: dynamischer Defense-Loop
+- `scenarios/dynamic_joint_loop.py`: kombinierter Vote+Defense-Loop
 
 ## Hinweise
 
