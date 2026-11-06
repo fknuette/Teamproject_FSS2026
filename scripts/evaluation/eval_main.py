@@ -324,11 +324,16 @@ def _run_trueskill_mode(args, output_dir: Path) -> None:
     registry_path = prepare_registry_path(registry_path, reset_registry=args.reset_registry)
     registry = CheckpointRegistry(registry_path)
 
-    # Always ensure the baseline (untrained) model is in the registry
+    # Always ensure the baseline (untrained) model is in the registry.
+    # Keep its TrueSkill uncertainty tiny so it behaves as a stable reference.
     if args.baseline_checkpoint not in registry.all_ids():
-        registry.register(args.baseline_checkpoint, args.baseline_checkpoint)
+        registry.register_baseline(args.baseline_checkpoint)
         registry.save()
         print(f"Registered baseline: {args.baseline_checkpoint}")
+    else:
+        for role in ROLES:
+            registry.get(args.baseline_checkpoint).ratings[role].sigma = 0.01
+        registry.save()
 
     lora_chain_merge: bool = getattr(args, "lora_chain_merge", False)
     checkpoint_dir = Path(args.checkpoint_dir)
