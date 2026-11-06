@@ -130,7 +130,7 @@ class RandomMatchmaker(Matchmaker):
     """
 
     NUM_MAFIA = 2   # player slots assigned team="Mafia"
-    NUM_VILLAGE = 4  # player slots assigned team="Village" (sub-roles set at runtime)
+    NUM_VILLAGE = 6  # player slots assigned team="Village" (sub-roles set at runtime)
 
     def __init__(
         self,

@@ -16,7 +16,8 @@ _DEFAULT_SIGMA = 25.0 / 3
 _DEFAULT_BETA = 25.0 / 6
 _DEFAULT_TAU = 25.0 / 300
 _DEFAULT_DRAW_PROB = 0.0
-
+_DEFAULT_BASELINE_SIGMA = 0.01
+_DEFAULT_BASELINE_MU_MAFIA = 25.0
 
 @dataclass
 class RoleRating:
@@ -88,6 +89,22 @@ class CheckpointRegistry:
     def get(self, checkpoint_id: str) -> CheckpointEntry:
         """Return the entry for *checkpoint_id*, raising ``KeyError`` if absent."""
         return self._checkpoints[checkpoint_id]
+
+    def register_baseline(
+        self,
+        checkpoint_id: str,
+        path: str | None = None,
+        *,
+        sigma: float = _DEFAULT_BASELINE_SIGMA,
+    ) -> CheckpointEntry:
+        """Register a baseline checkpoint with intentionally tiny uncertainty."""
+        path = checkpoint_id if path is None else path
+        entry = self.register(checkpoint_id, path, overwrite=True)
+        for role in ROLES:
+            entry.ratings[role].sigma = sigma
+            if role == "Mafia":
+                entry.ratings[role].mu = _DEFAULT_BASELINE_MU_MAFIA
+        return entry
 
     def all_ids(self) -> list[str]:
         """Return all registered checkpoint IDs."""
